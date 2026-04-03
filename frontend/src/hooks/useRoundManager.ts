@@ -11,11 +11,14 @@ import {
   ER_DIRECT_RPC,
   SOL_USD_ORACLE_PDA,
 } from "@/lib/constants";
+import {
+  DELEGATION_PROGRAM_ID,
+  MAGIC_PROGRAM_ID,
+  MAGIC_CONTEXT_ID,
+  delegationRecordPdaFromDelegatedAccount,
+  delegationMetadataPdaFromDelegatedAccount,
+} from "@magicblock-labs/ephemeral-rollups-sdk";
 import idl from "@/idl/volt.json";
-
-const DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
-const MAGIC_CONTEXT_ID = new PublicKey("MagicContext1111111111111111111111111111111");
-const MAGIC_PROGRAM_ID = new PublicKey("Magic11111111111111111111111111111111111111");
 
 export type RoundPhase = "idle" | "creating" | "delegating" | "open" | "settling" | "closed";
 
@@ -208,19 +211,13 @@ export function useRoundManager(marketSymbol: string = "SOL") {
         totalShortContracts: 0,
       }));
 
-      // Delegate to ER
+      // Delegate to ER — use SDK helpers for PDA derivation
       const [bufferPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("buffer"), roundPda.toBytes()],
         PROGRAM_PUBKEY
       );
-      const [delegationRecord] = PublicKey.findProgramAddressSync(
-        [Buffer.from("delegation"), roundPda.toBytes()],
-        DELEGATION_PROGRAM_ID
-      );
-      const [delegationMetadata] = PublicKey.findProgramAddressSync(
-        [Buffer.from("delegation-metadata"), roundPda.toBytes()],
-        DELEGATION_PROGRAM_ID
-      );
+      const delegationRecord = delegationRecordPdaFromDelegatedAccount(roundPda);
+      const delegationMetadata = delegationMetadataPdaFromDelegatedAccount(roundPda);
 
       await program.methods
         .delegateRound()
@@ -282,18 +279,37 @@ export function useRoundManager(marketSymbol: string = "SOL") {
       const signature = await erConn.sendRawTransaction(tx.serialize(), { skipPreflight: true });
       await erConn.confirmTransaction({ blockhash, lastValidBlockHeight, signature }, "confirmed");
 
-      // Fetch final round state from base layer (after undelegation commits)
+      // Wait for undelegation to propagate back to base layer
       const program = getProgram();
-      if (program) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const roundData = await (program.account as any).round.fetch(round.roundPda);
-        setRound((prev) => ({
-          ...prev,
-          endPrice: roundData.endPrice.toNumber() / 1e6,
-          totalLongContracts: roundData.totalLongContracts.toNumber(),
-          totalShortContracts: roundData.totalShortContracts.toNumber(),
-          phase: "closed",
-        }));
+      if (program && round.roundPda) {
+        let roundData = null;
+        for (let attempt = 0; attempt < 15; attempt++) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const data = await (program.account as any).round.fetch(round.roundPda);
+            // Check if the account is back on base layer and settled
+            if (data.endPrice.toNumber() > 0) {
+              roundData = data;
+              break;
+            }
+          } catch {
+            // Account still on ER, not yet undelegated
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+
+        if (roundData) {
+          setRound((prev) => ({
+            ...prev,
+            endPrice: roundData.endPrice.toNumber() / 1e6,
+            totalLongContracts: roundData.totalLongContracts.toNumber(),
+            totalShortContracts: roundData.totalShortContracts.toNumber(),
+            phase: "closed",
+          }));
+        } else {
+          // Fallback: mark closed even if we couldn't read back
+          setRound((prev) => ({ ...prev, phase: "closed" }));
+        }
       }
     } catch (err) {
       console.error("[useRoundManager] settleRound error:", err);
