@@ -1,0 +1,712 @@
+{
+  "address": "BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi",
+  "metadata": {
+    "name": "volt",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Volt — 30-Second Perpetuals on Ephemeral Rollups"
+  },
+  "instructions": [
+    {
+      "name": "callback_bonus",
+      "docs": [
+        "VRF callback — called by VRF oracle program with randomness result",
+        "Sets bonus_multiplier: 1x (50%), 2x (35%), 3x (15%)"
+      ],
+      "discriminator": [
+        19,
+        184,
+        49,
+        39,
+        103,
+        32,
+        44,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "oracle"
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_round",
+      "docs": [
+        "Create a new 30-second trading round, capturing start_price from Oracle"
+      ],
+      "discriminator": [
+        229,
+        218,
+        236,
+        169,
+        231,
+        80,
+        134,
+        112
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true
+        },
+        {
+          "name": "price_feed"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegate_round",
+      "docs": [
+        "Delegate round PDA to Ephemeral Rollup validator.",
+        "Follows the MagicBlock delegation protocol:",
+        "1. Create buffer PDA (copy of round data) owned by this program",
+        "2. Zero round data",
+        "3. Reassign round owner: our_program → system_program → delegation_program",
+        "4. Call delegation program CPI (round PDA signs via invoke_signed)",
+        "5. Close buffer (return lamports to payer)"
+      ],
+      "discriminator": [
+        4,
+        60,
+        37,
+        224,
+        19,
+        130,
+        106,
+        111
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "round.round_number",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_program"
+        },
+        {
+          "name": "buffer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "delegation_record",
+          "writable": true
+        },
+        {
+          "name": "delegation_metadata",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_pool",
+      "docs": [
+        "Initialize the liquidity pool PDA"
+      ],
+      "discriminator": [
+        95,
+        180,
+        10,
+        172,
+        84,
+        174,
+        232,
+        40
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "open_position",
+      "docs": [
+        "Open a leveraged position (executed on Ephemeral Rollup via ER RPC)"
+      ],
+      "discriminator": [
+        135,
+        128,
+        47,
+        77,
+        15,
+        152,
+        240,
+        49
+      ],
+      "accounts": [
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.pool",
+                "account": "Round"
+              },
+              {
+                "kind": "account",
+                "path": "round.round_number",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "price_feed"
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "direction",
+          "type": {
+            "defined": {
+              "name": "Direction"
+            }
+          }
+        },
+        {
+          "name": "leverage",
+          "type": "u8"
+        },
+        {
+          "name": "margin",
+          "type": "u64"
+        },
+        {
+          "name": "is_agent",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "settle_position",
+      "docs": [
+        "Settle an individual position: calculate PnL with VRF bonus multiplier"
+      ],
+      "discriminator": [
+        33,
+        156,
+        74,
+        218,
+        215,
+        42,
+        112,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "round"
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "settle_round",
+      "docs": [
+        "Settle the round: capture end_price, then commit & undelegate via raw CPI"
+      ],
+      "discriminator": [
+        40,
+        101,
+        18,
+        1,
+        31,
+        129,
+        52,
+        77
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.pool",
+                "account": "Round"
+              },
+              {
+                "kind": "account",
+                "path": "round.round_number",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "price_feed"
+        },
+        {
+          "name": "magic_context"
+        },
+        {
+          "name": "magic_program"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Pool",
+      "discriminator": [
+        241,
+        154,
+        109,
+        4,
+        17,
+        177,
+        109,
+        188
+      ]
+    },
+    {
+      "name": "Position",
+      "discriminator": [
+        170,
+        188,
+        143,
+        228,
+        122,
+        64,
+        247,
+        208
+      ]
+    },
+    {
+      "name": "Round",
+      "discriminator": [
+        87,
+        127,
+        165,
+        51,
+        73,
+        78,
+        116,
+        174
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "RoundNotOpen",
+      "msg": "Round is not open for trading"
+    },
+    {
+      "code": 6001,
+      "name": "RoundNotSettling",
+      "msg": "Round is not ready to settle"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidLeverage",
+      "msg": "Invalid leverage — must be 2, 5, or 10"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidMargin",
+      "msg": "Invalid margin — must be > 0"
+    },
+    {
+      "code": 6004,
+      "name": "AlreadySettled",
+      "msg": "Position already settled"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidOracle",
+      "msg": "Invalid oracle account"
+    },
+    {
+      "code": 6006,
+      "name": "UnauthorizedVrf",
+      "msg": "Unauthorized — not VRF oracle"
+    }
+  ],
+  "types": [
+    {
+      "name": "Direction",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Long"
+          },
+          {
+            "name": "Short"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Pool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_liquidity",
+            "type": "u64"
+          },
+          {
+            "name": "current_round",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Position",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "round",
+            "type": "pubkey"
+          },
+          {
+            "name": "direction",
+            "type": {
+              "defined": {
+                "name": "Direction"
+              }
+            }
+          },
+          {
+            "name": "leverage",
+            "type": "u8"
+          },
+          {
+            "name": "margin",
+            "type": "u64"
+          },
+          {
+            "name": "entry_price",
+            "type": "u64"
+          },
+          {
+            "name": "is_agent",
+            "type": "bool"
+          },
+          {
+            "name": "bonus_multiplier",
+            "type": "u8"
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          },
+          {
+            "name": "pnl",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Round",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_number",
+            "type": "u64"
+          },
+          {
+            "name": "start_price",
+            "type": "u64"
+          },
+          {
+            "name": "end_price",
+            "type": "u64"
+          },
+          {
+            "name": "start_time",
+            "type": "i64"
+          },
+          {
+            "name": "end_time",
+            "type": "i64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "RoundStatus"
+              }
+            }
+          },
+          {
+            "name": "total_long",
+            "type": "u64"
+          },
+          {
+            "name": "total_short",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Settling"
+          },
+          {
+            "name": "Closed"
+          }
+        ]
+      }
+    }
+  ]
+}

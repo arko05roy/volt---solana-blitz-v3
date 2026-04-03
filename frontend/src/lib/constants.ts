@@ -9,3 +9,7 @@ export const TEST_WALLET = "Bt9oNR5cCtnfuMmXgWELd6q5i974PdEMQDUE55nBC57L";
 // Confirmed live oracle PDA on ER devnet — returns price=0 on base, live price on ER
 export const SOL_USD_ORACLE_PDA = "9Uz4aJ2LKfc6Dt4zByG6qRDVtGbHC2ZBHissoc9x343P";
 export const ORACLE_PRICE_OFFSET = 73; // read u64 LE at this byte offset
+
+// SOAR — on-chain leaderboard (initialized on devnet 2026-04-03)
+export const SOAR_GAME_ADDRESS = "GKWPKiofxmzg39UmefK4nGqB5Ahoi9aBMtMR6BBaP54f";
+export const SOAR_LEADERBOARD_ADDRESS = "3p4hEbGnLMDgFKLDbbGdZ9JdEmJgKWjTFh77MXesk56H";
