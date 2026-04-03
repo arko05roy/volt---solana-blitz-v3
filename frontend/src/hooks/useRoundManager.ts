@@ -301,14 +301,7 @@ export function useRoundManager(marketSymbol: string = "SOL") {
     }
   }, [getErProgram, getProgram, round.roundPda, wallet]);
 
-  // Auto-cycle: start new round after 3s when closed
-  useEffect(() => {
-    if (round.phase !== "closed") return;
-    const t = setTimeout(() => {
-      startRound();
-    }, 3000);
-    return () => clearTimeout(t);
-  }, [round.phase, startRound]);
+  // No auto-cycle — caller decides when to start the next round
 
   // Settlement timer: fire at T+30
   useEffect(() => {
