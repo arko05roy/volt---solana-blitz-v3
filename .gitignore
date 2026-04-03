@@ -1,0 +1,13 @@
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
+# Rust/Anchor
+web3/target/
+web3/.anchor/
+
+# OS
+.DS_Store
+
+# Keys — never commit wallet private keys
