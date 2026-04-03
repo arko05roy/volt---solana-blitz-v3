@@ -13,9 +13,7 @@ import {
 } from "@/lib/constants";
 import idl from "@/idl/volt.json";
 
-// MagicBlock delegation program
 const DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
-// Magic context for ER undelegation
 const MAGIC_CONTEXT_ID = new PublicKey("MagicContext1111111111111111111111111111111");
 const MAGIC_PROGRAM_ID = new PublicKey("Magic11111111111111111111111111111111111111");
 
@@ -24,31 +22,48 @@ export type RoundPhase = "idle" | "creating" | "delegating" | "open" | "settling
 export interface RoundState {
   roundNumber: number | null;
   roundPda: PublicKey | null;
+  marketPda: PublicKey | null;
   startPrice: number;
   endPrice: number;
   startTime: number;
   endTime: number;
   phase: RoundPhase;
-  totalLong: number;
-  totalShort: number;
+  totalLongContracts: number;
+  totalShortContracts: number;
 }
 
 const PROGRAM_PUBKEY = new PublicKey(PROGRAM_ID);
 const ORACLE_PDA = new PublicKey(SOL_USD_ORACLE_PDA);
 
-function getPoolPda(): PublicKey {
+export function getVaultPda(): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("pool")],
+    [Buffer.from("vault")],
     PROGRAM_PUBKEY
   );
   return pda;
 }
 
-function getRoundPda(poolPda: PublicKey, roundNumber: number): PublicKey {
+export function getMarketPda(symbol: string): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("market"), Buffer.from(symbol)],
+    PROGRAM_PUBKEY
+  );
+  return pda;
+}
+
+export function getRoundCounterPda(marketPda: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("round_counter"), marketPda.toBytes()],
+    PROGRAM_PUBKEY
+  );
+  return pda;
+}
+
+export function getRoundPda(marketPda: PublicKey, roundNumber: number): PublicKey {
   const [pda] = PublicKey.findProgramAddressSync(
     [
       Buffer.from("round"),
-      poolPda.toBytes(),
+      marketPda.toBytes(),
       new BN(roundNumber).toArrayLike(Buffer, "le", 8),
     ],
     PROGRAM_PUBKEY
@@ -56,27 +71,42 @@ function getRoundPda(poolPda: PublicKey, roundNumber: number): PublicKey {
   return pda;
 }
 
-export function useRoundManager() {
+export function getPositionPda(roundPda: PublicKey, signer: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), roundPda.toBytes(), signer.toBytes()],
+    PROGRAM_PUBKEY
+  );
+  return pda;
+}
+
+export function getLpPositionPda(vaultPda: PublicKey, user: PublicKey): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("lp"), vaultPda.toBytes(), user.toBytes()],
+    PROGRAM_PUBKEY
+  );
+  return pda;
+}
+
+export function useRoundManager(marketSymbol: string = "SOL") {
   const wallet = useAnchorWallet();
   const { connection } = useConnection();
 
   const [round, setRound] = useState<RoundState>({
     roundNumber: null,
     roundPda: null,
+    marketPda: null,
     startPrice: 0,
     endPrice: 0,
     startTime: 0,
     endTime: 0,
     phase: "idle",
-    totalLong: 0,
-    totalShort: 0,
+    totalLongContracts: 0,
+    totalShortContracts: 0,
   });
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isRunning = useRef(false);
 
-  // Base-layer program (for createRound, delegateRound, reading pool state).
-  // Must NOT use the ER RPC — base-layer txs need base Solana blockhashes.
   const getProgram = useCallback(
     (conn?: Connection) => {
       if (!wallet) return null;
@@ -101,28 +131,29 @@ export function useRoundManager() {
     isRunning.current = true;
 
     try {
-      const poolPda = getPoolPda();
+      const vaultPda = getVaultPda();
+      const marketPda = getMarketPda(marketSymbol);
+      const counterPda = getRoundCounterPda(marketPda);
 
-      // Fetch pool to get current round number
-      let pool;
+      // Fetch round counter to get next round number
+      let counter;
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        pool = await (program.account as any).pool.fetch(poolPda);
+        counter = await (program.account as any).roundCounter.fetch(counterPda);
       } catch {
-        // Pool not initialized — skip
+        // Counter not initialized — skip
         isRunning.current = false;
         return;
       }
 
-      const nextRoundNum = pool.currentRound.toNumber() + 1;
-      const roundPda = getRoundPda(poolPda, nextRoundNum);
+      const nextRoundNum = counter.roundNumber.toNumber();
+      const roundPda = getRoundPda(marketPda, nextRoundNum);
 
       // Check if round already exists
       let roundData;
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         roundData = await (program.account as any).round.fetch(roundPda);
-        // Round exists — join it
         const phase: RoundPhase = roundData.status.open
           ? "open"
           : roundData.status.settling
@@ -131,18 +162,19 @@ export function useRoundManager() {
         setRound({
           roundNumber: roundData.roundNumber.toNumber(),
           roundPda,
+          marketPda,
           startPrice: roundData.startPrice.toNumber() / 1e6,
           endPrice: roundData.endPrice.toNumber() / 1e6,
           startTime: roundData.startTime.toNumber(),
           endTime: roundData.endTime.toNumber(),
           phase,
-          totalLong: roundData.totalLong.toNumber(),
-          totalShort: roundData.totalShort.toNumber(),
+          totalLongContracts: roundData.totalLongContracts.toNumber(),
+          totalShortContracts: roundData.totalShortContracts.toNumber(),
         });
         isRunning.current = false;
         return;
       } catch {
-        // Round doesn't exist yet — create it
+        // Round doesn't exist — create it
       }
 
       setRound((prev) => ({ ...prev, phase: "creating" }));
@@ -150,7 +182,9 @@ export function useRoundManager() {
       await program.methods
         .createRound()
         .accounts({
-          pool: poolPda,
+          vault: vaultPda,
+          market: marketPda,
+          roundCounter: counterPda,
           round: roundPda,
           priceFeed: ORACLE_PDA,
           payer: wallet!.publicKey,
@@ -165,12 +199,13 @@ export function useRoundManager() {
         ...prev,
         roundNumber: nextRoundNum,
         roundPda,
+        marketPda,
         startPrice: roundData.startPrice.toNumber() / 1e6,
         startTime: roundData.startTime.toNumber(),
         endTime: roundData.endTime.toNumber(),
         phase: "delegating",
-        totalLong: 0,
-        totalShort: 0,
+        totalLongContracts: 0,
+        totalShortContracts: 0,
       }));
 
       // Delegate to ER
@@ -191,7 +226,7 @@ export function useRoundManager() {
         .delegateRound()
         .accounts({
           payer: wallet!.publicKey,
-          pool: poolPda,
+          vault: vaultPda,
           round: roundPda,
           ownerProgram: PROGRAM_PUBKEY,
           buffer: bufferPda,
@@ -208,7 +243,7 @@ export function useRoundManager() {
     } finally {
       isRunning.current = false;
     }
-  }, [getProgram, wallet]);
+  }, [getProgram, wallet, marketSymbol]);
 
   const settleRound = useCallback(async () => {
     const erProgram = getErProgram();
@@ -231,7 +266,6 @@ export function useRoundManager() {
         })
         .transaction();
 
-      // Noop for uniqueness
       tx.add(
         new TransactionInstruction({
           programId: new PublicKey("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"),
@@ -248,7 +282,7 @@ export function useRoundManager() {
       const signature = await erConn.sendRawTransaction(tx.serialize(), { skipPreflight: true });
       await erConn.confirmTransaction({ blockhash, lastValidBlockHeight, signature }, "confirmed");
 
-      // Fetch final round state
+      // Fetch final round state from base layer (after undelegation commits)
       const program = getProgram();
       if (program) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -256,8 +290,8 @@ export function useRoundManager() {
         setRound((prev) => ({
           ...prev,
           endPrice: roundData.endPrice.toNumber() / 1e6,
-          totalLong: roundData.totalLong.toNumber(),
-          totalShort: roundData.totalShort.toNumber(),
+          totalLongContracts: roundData.totalLongContracts.toNumber(),
+          totalShortContracts: roundData.totalShortContracts.toNumber(),
           phase: "closed",
         }));
       }
@@ -304,8 +338,8 @@ export function useRoundManager() {
         const data = await (program.account as any).round.fetch(round.roundPda);
         setRound((prev) => ({
           ...prev,
-          totalLong: data.totalLong.toNumber(),
-          totalShort: data.totalShort.toNumber(),
+          totalLongContracts: data.totalLongContracts.toNumber(),
+          totalShortContracts: data.totalShortContracts.toNumber(),
         }));
       } catch {
         // ER may not have it yet
@@ -322,8 +356,7 @@ export function useRoundManager() {
     round,
     startRound,
     settleRound,
-    getPoolPda,
-    getRoundPda,
+    getProgram,
     getErProgram,
   };
 }
