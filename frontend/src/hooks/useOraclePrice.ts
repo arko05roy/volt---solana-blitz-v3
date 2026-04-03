@@ -1,28 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Connection, PublicKey } from "@solana/web3.js";
-import { ER_DIRECT_RPC, SOL_USD_ORACLE_PDA, ORACLE_PRICE_OFFSET } from "@/lib/constants";
+import { Market, DEFAULT_MARKET } from "@/lib/markets";
 
-// The oracle PDA 9Uz4aJ2LKfc6Dt4zByG6qRDVtGbHC2ZBHissoc9x343P lives on ER direct.
-// Magic Router (devnet-router.magicblock.app) returns null for oracle accounts.
-// Must use devnet-as.magicblock.app directly.
+// Uses Pyth Hermes API for accurate real-time prices across all markets.
+// The on-chain ER oracle PDA is reserved for settlement in the Anchor program.
 
-export function useOraclePrice(): { price: number; loading: boolean } {
+export function useOraclePrice(market: Market = DEFAULT_MARKET): { price: number; loading: boolean } {
   const [price, setPrice] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const connection = new Connection(ER_DIRECT_RPC, "confirmed");
-    const feedPDA = new PublicKey(SOL_USD_ORACLE_PDA);
     let cancelled = false;
 
     async function fetchPrice() {
       try {
-        const accountInfo = await connection.getAccountInfo(feedPDA);
-        if (!accountInfo || accountInfo.data.length < ORACLE_PRICE_OFFSET + 8) return;
-        const rawPrice = accountInfo.data.readBigUInt64LE(ORACLE_PRICE_OFFSET);
-        const priceUSD = Number(rawPrice) / 1e6;
+        const res = await fetch(
+          `https://hermes.pyth.network/v2/updates/price/latest?ids[]=${market.pythHermesFeedId}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const parsed = data.parsed?.[0]?.price;
+        if (!parsed) return;
+        // price = val * 10^expo
+        const priceUSD = Number(parsed.price) * Math.pow(10, parsed.expo);
         if (!cancelled && priceUSD > 0) {
           setPrice(priceUSD);
           setLoading(false);
@@ -33,12 +34,12 @@ export function useOraclePrice(): { price: number; loading: boolean } {
     }
 
     fetchPrice();
-    const interval = setInterval(fetchPrice, 200);
+    const interval = setInterval(fetchPrice, 1000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [market.pythHermesFeedId]);
 
   return { price, loading };
 }

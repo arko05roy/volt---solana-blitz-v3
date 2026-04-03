@@ -14,7 +14,9 @@ export function useSessionKey() {
     !!sessionWallet.publicKey &&
     !sessionWallet.isLoading;
 
-  const isExpired = !isActive && !!sessionWallet.ownerPublicKey;
+  // Only mark expired if a session token was previously issued but is no longer valid.
+  // ownerPublicKey alone just means a wallet is connected — not that a session existed.
+  const isExpired = !isActive && !!sessionWallet.sessionToken && !!sessionWallet.ownerPublicKey;
 
   async function createSession() {
     const targetProgram = new PublicKey(PROGRAM_ID);

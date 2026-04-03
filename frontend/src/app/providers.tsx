@@ -2,14 +2,18 @@
 
 import { ConnectionProvider, WalletProvider, useConnection, useAnchorWallet } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { useMemo } from "react";
+import { useMemo, ReactNode } from "react";
 import { SessionWalletProvider, useSessionKeyManager } from "@magicblock-labs/gum-react-sdk";
-import { ER_RPC } from "@/lib/constants";
+import { BASE_RPC, ER_RPC } from "@/lib/constants";
+import { Connection } from "@solana/web3.js";
 
 function SessionProvider({ children }: { children: React.ReactNode }) {
-  const { connection } = useConnection();
+  // Session keys are created on base Solana devnet, NOT the ER.
+  // Using the ER RPC here causes "Blockhash not found" because the ER router
+  // returns blockhashes that are invalid for base-layer transactions.
+  const baseConnection = useMemo(() => new Connection(BASE_RPC, "confirmed"), []);
   const anchorWallet = useAnchorWallet();
-  const sessionWallet = useSessionKeyManager(anchorWallet, connection, "devnet");
+  const sessionWallet = useSessionKeyManager(anchorWallet, baseConnection, "devnet");
 
   return (
     <SessionWalletProvider sessionWallet={sessionWallet}>

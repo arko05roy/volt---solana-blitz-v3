@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
 import { AnchorProvider, Program, BN, web3 } from "@coral-xyz/anchor";
-import { PublicKey, Connection } from "@solana/web3.js";
+import { PublicKey, Connection, Keypair, Transaction, TransactionInstruction } from "@solana/web3.js";
 import {
   PROGRAM_ID,
+  BASE_RPC,
   ER_RPC,
   ER_DIRECT_RPC,
   SOL_USD_ORACLE_PDA,
@@ -74,16 +75,19 @@ export function useRoundManager() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isRunning = useRef(false);
 
+  // Base-layer program (for createRound, delegateRound, reading pool state).
+  // Must NOT use the ER RPC — base-layer txs need base Solana blockhashes.
   const getProgram = useCallback(
     (conn?: Connection) => {
       if (!wallet) return null;
-      const provider = new AnchorProvider(conn ?? connection, wallet, {
+      const baseConn = conn ?? new Connection(BASE_RPC, "confirmed");
+      const provider = new AnchorProvider(baseConn, wallet, {
         commitment: "confirmed",
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return new Program(idl as any, provider);
     },
-    [wallet, connection]
+    [wallet]
   );
 
   const getErProgram = useCallback(() => {
@@ -208,23 +212,41 @@ export function useRoundManager() {
 
   const settleRound = useCallback(async () => {
     const erProgram = getErProgram();
-    if (!erProgram || !round.roundPda) return;
+    if (!erProgram || !round.roundPda || !wallet) return;
 
     try {
       setRound((prev) => ({ ...prev, phase: "settling" }));
 
-      const poolPda = getPoolPda();
+      const erConn = new Connection(ER_DIRECT_RPC);
+      const tempKeypair = Keypair.fromSeed(wallet.publicKey.toBytes());
 
-      await erProgram.methods
+      const tx: Transaction = await erProgram.methods
         .settleRound()
         .accounts({
-          payer: wallet!.publicKey,
+          payer: tempKeypair.publicKey,
           round: round.roundPda,
           priceFeed: ORACLE_PDA,
           magicContext: MAGIC_CONTEXT_ID,
           magicProgram: MAGIC_PROGRAM_ID,
         })
-        .rpc();
+        .transaction();
+
+      // Noop for uniqueness
+      tx.add(
+        new TransactionInstruction({
+          programId: new PublicKey("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"),
+          keys: [],
+          data: Buffer.from(crypto.getRandomValues(new Uint8Array(5))),
+        })
+      );
+
+      const { blockhash, lastValidBlockHeight } = await erConn.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = tempKeypair.publicKey;
+      tx.sign(tempKeypair);
+
+      const signature = await erConn.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+      await erConn.confirmTransaction({ blockhash, lastValidBlockHeight, signature }, "confirmed");
 
       // Fetch final round state
       const program = getProgram();
