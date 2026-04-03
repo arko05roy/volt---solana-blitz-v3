@@ -11,3 +11,7 @@ web3/.anchor/
 .DS_Store
 
 # Keys — never commit wallet private keys
+
+# Local-only planning docs
+hackathon-context.md
+plan.md
