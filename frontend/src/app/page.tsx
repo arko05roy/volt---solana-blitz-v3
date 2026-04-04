@@ -8,9 +8,9 @@ import { BN, Program, AnchorProvider } from "@coral-xyz/anchor";
 import { useOraclePrice } from "@/hooks/useOraclePrice";
 import { useSessionKey } from "@/hooks/useSessionKey";
 import { useRoundManager, RoundPhase, getPositionPda, getMarketPda } from "@/hooks/useRoundManager";
-import { useVault } from "@/hooks/useVault";
 import { MARKETS, Market } from "@/lib/markets";
 import MarketGrid, { ActiveTradeState } from "@/components/MarketGrid";
+import AgentOrb from "@/components/AgentOrb";
 import { PROGRAM_ID, ER_DIRECT_RPC, SOL_USD_ORACLE_PDA } from "@/lib/constants";
 import idl from "@/idl/volt.json";
 
@@ -43,8 +43,6 @@ export default function TradingPage() {
   const { price } = useOraclePrice(selectedMarket);
   const { isActive, isExpired, createSession } = useSessionKey();
   const { round, startRound, getErProgram } = useRoundManager(selectedMarket.symbol);
-  const { vault, depositLiquidity } = useVault();
-
   const [leverage, setLeverage] = useState<number>(2);
   const [margin, setMargin] = useState<string>("");
   const [tradeMessage, setTradeMessage] = useState<string>("");
@@ -53,10 +51,6 @@ export default function TradingPage() {
   const [settledResult, setSettledResult] = useState<SettledResult | null>(null);
   const prevPhaseRef = useRef<RoundPhase>("idle");
   const pendingTradeRef = useRef<{ direction: "long" | "short" } | null>(null);
-
-  // LP panel state
-  const [lpAmount, setLpAmount] = useState("");
-  const [lpLoading, setLpLoading] = useState(false);
 
   // Countdown timer
   const [timer, setTimer] = useState(30);
@@ -227,20 +221,6 @@ export default function TradingPage() {
     }
   }
 
-  async function handleLpDeposit() {
-    const amount = parseFloat(lpAmount);
-    if (!amount || amount <= 0) return;
-    setLpLoading(true);
-    try {
-      await depositLiquidity(amount);
-      setLpAmount("");
-    } catch (err) {
-      console.error("[LP deposit]", err);
-    } finally {
-      setLpLoading(false);
-    }
-  }
-
   const sessionLabel = isExpired ? "Expired" : isActive ? "Active" : "None";
 
   // ── Build activeTrade state to pass into MarketGrid ────
@@ -325,74 +305,23 @@ export default function TradingPage() {
               </button>
             )}
           </div>
-          {/* Vault TVL */}
-          <div className="text-right text-xs">
-            <p className="text-zinc-500">Vault TVL</p>
-            <p className="font-mono text-green-400">${vault.totalDeposits.toFixed(2)}</p>
-          </div>
           <WalletMultiButton />
         </div>
       </header>
 
-      {/* LP Sidebar + Market Grid */}
-      <div className="flex flex-col lg:flex-row flex-1 gap-6 px-4 py-6 max-w-[1400px] mx-auto w-full">
-        {/* Left: LP Panel */}
-        <div className="w-full lg:w-60 flex-shrink-0 flex flex-col gap-4">
-          <div className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800">
-            <h2 className="text-sm font-bold text-zinc-300 mb-3">Liquidity Vault</h2>
-            <div className="grid grid-cols-2 gap-2 text-xs mb-4">
-              <div>
-                <p className="text-zinc-500">Total Deposits</p>
-                <p className="font-mono">${vault.totalDeposits.toFixed(2)}</p>
-              </div>
-              <div>
-                <p className="text-zinc-500">Reserved</p>
-                <p className="font-mono">${vault.reservedAmount.toFixed(2)}</p>
-              </div>
-              <div>
-                <p className="text-zinc-500">VLP Price</p>
-                <p className="font-mono">${vault.vlpPrice.toFixed(4)}</p>
-              </div>
-              <div>
-                <p className="text-zinc-500">Your VLP</p>
-                <p className="font-mono">{vault.userVlpShares.toFixed(2)}</p>
-              </div>
-            </div>
-            <input
-              type="number"
-              placeholder="USDC amount"
-              value={lpAmount}
-              onChange={(e) => setLpAmount(e.target.value)}
-              className="w-full bg-zinc-800 text-white rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-zinc-500 placeholder-zinc-500 mb-2"
-            />
-            <button
-              onClick={handleLpDeposit}
-              disabled={lpLoading || !wallet}
-              className="w-full py-2 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-500 disabled:opacity-40 transition-colors"
-            >
-              {lpLoading ? "..." : "Deposit to Vault"}
-            </button>
+      {/* Market Grid */}
+      <div className="flex-1 px-4 py-6 max-w-[1400px] mx-auto w-full">
+        {tradeMessage && (
+          <div className={`rounded-xl p-3 text-xs font-medium mb-4 max-w-sm ${
+            tradeMessage.startsWith("Error") ? "bg-red-900/20 text-red-400 border border-red-800/30" : "bg-yellow-900/20 text-yellow-400 border border-yellow-800/30"
+          }`}>
+            {tradeMessage}
           </div>
-
-          <div className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800 text-xs">
-            <p className="text-zinc-500">Protocol Fees Earned</p>
-            <p className="font-mono text-green-400">${vault.protocolFees.toFixed(4)}</p>
-          </div>
-
-          {tradeMessage && (
-            <div className={`rounded-xl p-3 text-xs font-medium ${
-              tradeMessage.startsWith("Error") ? "bg-red-900/20 text-red-400 border border-red-800/30" : "bg-yellow-900/20 text-yellow-400 border border-yellow-800/30"
-            }`}>
-              {tradeMessage}
-            </div>
-          )}
-        </div>
-
-        {/* Main: Market Grid */}
-        <div className="flex-1 min-w-0">
-          <MarketGrid onTrade={handleMarketTrade} activeTrade={activeTrade} />
-        </div>
+        )}
+        <MarketGrid onTrade={handleMarketTrade} activeTrade={activeTrade} />
       </div>
+
+      <AgentOrb onTrade={handleMarketTrade} />
     </div>
   );
 }

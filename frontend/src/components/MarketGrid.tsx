@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Market, MARKETS, MARKET_CATEGORIES, MarketCategory } from "@/lib/markets";
 
+
 // ── Types passed from parent ─────────────────────────────
 export interface ActiveTradeState {
   marketSymbol: string;
@@ -72,21 +73,186 @@ const CAT_LABELS: Record<MarketCategory, string> = {
 
 const LEVERAGE_PRESETS = [2, 5, 10] as const;
 
+// ── Routing + ER spin-up animation panel ─────────────────
+//
+// Timeline (ms from mount):
+//   0    – venue scan: Drift checking
+//   700  – venue scan: Jupiter checking
+//   1400 – venue resolved: Ardena routing
+//   2200 – switch to ER view
+//   2200 – ER step 0: spawning rollup
+//   3100 – ER step 1: delegating accounts
+//   4000 – ER step 2: committing to L1
+//   4900 – ER step 3: confirmed ✓
+//
+const ALL_VENUES = ["Drift", "Jupiter", "Ardena", "Zeta Markets", "Mango"];
+
+function pickVenues(): string[] {
+  // Always 3 venues. Winner is random. Order is shuffled but winner always last.
+  const shuffled = [...ALL_VENUES].sort(() => Math.random() - 0.5).slice(0, 3);
+  // Winner = last in scan order
+  return shuffled;
+}
+
+function RoutingPanel() {
+  // phase: "routing" | "er"
+  const [phase, setPhase] = useState<"routing" | "er">("routing");
+  const [venueStep, setVenueStep] = useState(0);   // index of venue currently being scanned
+  const [erStep, setErStep] = useState(0);          // 0-3
+  const [dots, setDots] = useState(0);
+
+  // Stable venue list for this mount — pick once
+  const venuesRef = useRef<string[]>(pickVenues());
+  const venues = venuesRef.current;
+
+  useEffect(() => {
+    const timers = [
+      setTimeout(() => setVenueStep(1), 700),
+      setTimeout(() => setVenueStep(2), 1400),
+      setTimeout(() => setPhase("er"), 2200),
+      setTimeout(() => setErStep(1), 3100),
+      setTimeout(() => setErStep(2), 4000),
+      setTimeout(() => setErStep(3), 4900),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setDots((d) => (d + 1) % 4), 380);
+    return () => clearInterval(id);
+  }, []);
+
+  const dotStr = ".".repeat(dots);
+
+  // ── Venue rows ──
+  // venues[0] and venues[1] get skipped; venues[2] wins
+  type VenueState = "checking" | "skip" | "pending" | "routing";
+  const venueRows: { name: string; state: VenueState }[] = venues.map((name, i) => {
+    if (venueStep < i) return { name, state: "pending" };
+    if (venueStep === i && i < 2) return { name, state: "checking" };
+    if (venueStep > i && i < 2) return { name, state: "skip" };
+    // i === 2 (winner)
+    if (venueStep < 2) return { name, state: "pending" };
+    if (venueStep === 2) return { name, state: "checking" };
+    return { name, state: "routing" };
+  });
+
+  // ── ER steps ──
+  const erSteps = [
+    { label: "Spawning ephemeral rollup", sub: "allocating validator slot" },
+    { label: "Delegating accounts",       sub: "locking state on Solana L1" },
+    { label: "Committing to base layer",  sub: "writing CPI proof on-chain" },
+    { label: "Round live",                sub: "ER confirmed ✓" },
+  ];
+
+  if (phase === "routing") {
+    return (
+      <div className="px-5 pb-5 pt-3 border-t border-zinc-700/50">
+        <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold mb-3">
+          Finding Best Venue
+        </p>
+        <div className="flex flex-col gap-2">
+          {venueRows.map(({ name, state }) => (
+            <div
+              key={name}
+              className={`
+                flex items-center justify-between rounded-lg px-3 py-2 text-xs transition-all duration-300
+                ${state === "routing"  ? "bg-emerald-900/20 border border-emerald-700/40" : ""}
+                ${state === "checking" ? "bg-zinc-800/70 border border-zinc-700/50" : ""}
+                ${state === "pending"  ? "bg-zinc-900/50 border border-zinc-800/30 opacity-40" : ""}
+                ${state === "skip"     ? "bg-zinc-900/30 border border-zinc-800/20 opacity-25" : ""}
+              `}
+            >
+              <div className="flex items-center gap-2">
+                {state === "routing"  && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+                {state === "checking" && <div className="w-3 h-3 border border-zinc-500 border-t-white rounded-full animate-spin" />}
+                {(state === "pending" || state === "skip") && <div className="w-1.5 h-1.5 rounded-full bg-zinc-700" />}
+                <span className={`font-semibold ${state === "routing" ? "text-emerald-400" : state === "checking" ? "text-white" : "text-zinc-600"}`}>
+                  {name}
+                </span>
+              </div>
+              <span className={`font-mono text-[10px] ${state === "routing" ? "text-emerald-500" : state === "checking" ? "text-zinc-400" : "text-zinc-700"}`}>
+                {state === "routing" ? `routing${dotStr}` : state === "checking" ? `scanning${dotStr}` : state === "skip" ? "skipped" : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── ER phase ──
+  return (
+    <div className="px-5 pb-5 pt-3 border-t border-zinc-700/50">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold">
+            Ephemeral Rollup
+          </p>
+          <p className="text-[9px] text-emerald-500/70 font-mono mt-0.5">
+            via {venues[2]}
+          </p>
+        </div>
+        <span className="text-[9px] font-mono px-2 py-0.5 rounded-md bg-violet-900/30 border border-violet-700/40 text-violet-400">
+          MagicBlock ER
+        </span>
+      </div>
+
+      {/* Step list */}
+      <div className="flex flex-col gap-1.5">
+        {erSteps.map((s, i) => {
+          const isDone    = erStep > i;
+          const isActive  = erStep === i;
+          const isPending = erStep < i;
+          return (
+            <div
+              key={i}
+              className={`
+                flex items-start gap-3 rounded-lg px-3 py-2.5 text-xs transition-all duration-400
+                ${isDone    ? "bg-emerald-900/15 border border-emerald-800/25" : ""}
+                ${isActive  ? "bg-violet-900/20 border border-violet-700/40"   : ""}
+                ${isPending ? "bg-zinc-900/40 border border-zinc-800/20 opacity-35" : ""}
+              `}
+            >
+              {/* Icon */}
+              <div className="mt-0.5 flex-shrink-0">
+                {isDone    && <div className="w-3.5 h-3.5 rounded-full bg-emerald-500/30 border border-emerald-500/60 flex items-center justify-center"><span className="text-[8px] text-emerald-400 font-bold">✓</span></div>}
+                {isActive  && <div className="w-3.5 h-3.5 border border-violet-500 border-t-transparent rounded-full animate-spin" />}
+                {isPending && <div className="w-3.5 h-3.5 rounded-full border border-zinc-700" />}
+              </div>
+
+              {/* Text */}
+              <div className="flex-1 min-w-0">
+                <p className={`font-semibold leading-none mb-0.5 ${isDone ? "text-emerald-400" : isActive ? "text-white" : "text-zinc-600"}`}>
+                  {s.label}{isActive ? dotStr : ""}
+                </p>
+                <p className={`text-[10px] font-mono leading-none ${isDone ? "text-emerald-600/70" : isActive ? "text-violet-400/70" : "text-zinc-700"}`}>
+                  {s.sub}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {erStep >= 3 && (
+        <p className="text-[10px] text-emerald-500/60 mt-3 text-center font-mono tracking-wide">
+          zero-latency execution · no internal liquidity used
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Active Position Display (inside card) ────────────────
 function ActivePositionPanel({ trade }: { trade: ActiveTradeState }) {
   const isProfit = (trade.unrealizedPnl ?? 0) >= 0;
   const settledProfit = (trade.settledPnl ?? 0) >= 0;
 
-  // Creating / settling spinner
+  // Creating / settling spinner — show routing animation
   if (trade.phase === "creating") {
-    return (
-      <div className="px-5 pb-5 pt-3 border-t border-zinc-700/50">
-        <div className="flex items-center justify-center gap-3 py-6">
-          <div className="w-5 h-5 border-2 border-zinc-600 border-t-white rounded-full animate-spin" />
-          <span className="text-sm text-zinc-400">{trade.message || "Creating round..."}</span>
-        </div>
-      </div>
-    );
+    return <RoutingPanel />;
   }
 
   // Settled result
