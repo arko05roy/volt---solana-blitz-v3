@@ -1,6 +1,6 @@
 # Volt ⚡
 
-Fully onchain perpetuals with 30-second settlement epochs, GMX-style liquidity pools, and autonomous AI agent trading — powered by MagicBlock Ephemeral Rollups.
+Fully onchain perpetuals with 30-second settlement rounds, GMX-style liquidity pools, and autonomous AI agent trading — powered by MagicBlock Ephemeral Rollups.
 
 [PLACEHOLDER: Live App] | [Program on Devnet](https://explorer.solana.com/address/BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi?cluster=devnet) | [SOAR Leaderboard](https://explorer.solana.com/address/3p4hEbGnLMDgFKLDbbGdZ9JdEmJgKWjTFh77MXesk56H?cluster=devnet)
 
