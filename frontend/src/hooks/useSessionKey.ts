@@ -21,7 +21,7 @@ export function useSessionKey() {
   async function createSession() {
     const targetProgram = new PublicKey(PROGRAM_ID);
     // topUp = false (session key doesn't need SOL — ER is gasless)
-    await sessionWallet.createSession(targetProgram, false, SESSION_DURATION_MINUTES);
+    await sessionWallet.createSession(targetProgram, 0, SESSION_DURATION_MINUTES);
   }
 
   async function revokeSession() {

@@ -7,7 +7,7 @@
 
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { AnchorProvider, Wallet } from "@coral-xyz/anchor";
-import { SoarProgram, GameType, Genre, GameClient } from "@magicblock-labs/soar-sdk";
+import { SoarProgram, GameClient } from "@magicblock-labs/soar-sdk";
 import fs from "fs";
 import path from "path";
 
@@ -34,9 +34,9 @@ async function main() {
     gameKeypair.publicKey,
     "Volt",
     "30-second leveraged trading arena on Solana",
-    Genre.Action,
-    GameType.Web,
-    null, // no NFT meta for devnet
+    2, // Genre.Action
+    2, // GameType.Web
+    null as unknown as PublicKey, // no NFT meta for devnet
     [authority.publicKey]
   );
 
@@ -49,10 +49,11 @@ async function main() {
 
   console.log("Adding leaderboard...");
   const { transaction: lbTx } = await gameClient.addLeaderBoard(
+    authority.publicKey,
     "Cumulative PnL",
-    null, // no NFT reward
-    false, // ascending = false → higher is better
-    undefined // no score cap
+    null as unknown as PublicKey, // no NFT reward
+    10, // scores to retain
+    false // ascending = false → higher is better
   );
   await soar.sendAndConfirmTransaction(lbTx);
 

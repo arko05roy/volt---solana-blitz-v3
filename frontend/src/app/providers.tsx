@@ -13,7 +13,7 @@ function SessionProvider({ children }: { children: React.ReactNode }) {
   // returns blockhashes that are invalid for base-layer transactions.
   const baseConnection = useMemo(() => new Connection(BASE_RPC, "confirmed"), []);
   const anchorWallet = useAnchorWallet();
-  const sessionWallet = useSessionKeyManager(anchorWallet, baseConnection, "devnet");
+  const sessionWallet = useSessionKeyManager(anchorWallet!, baseConnection, "devnet");
 
   return (
     <SessionWalletProvider sessionWallet={sessionWallet}>

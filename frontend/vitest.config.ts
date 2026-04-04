@@ -17,9 +17,8 @@ export default defineConfig({
     environmentOptions: {
       // jsdom needs crypto for @solana/web3.js PDA derivation
     },
-    // Override environment per file pattern
+    // @ts-expect-error -- vitest v3 API, still functional at runtime
     environmentMatchGlobs: [
-      // Blockchain/SDK tests that need Node crypto — run in node environment
       ["tests/hooks/**", "node"],
       ["tests/soar/**", "node"],
       ["tests/api/**", "node"],
