@@ -22,10 +22,10 @@
   --border-hover: rgba(255, 255, 255, 0.12);
   --border-active: rgba(255, 255, 255, 0.18);
 
-  /* Brand — electric violet */
-  --volt-brand: #8B5CF6;
-  --volt-brand-dim: rgba(139, 92, 246, 0.15);
-  --volt-brand-glow: rgba(139, 92, 246, 0.25);
+  /* Brand — electric emerald */
+  --volt-brand: #00FF88;
+  --volt-brand-dim: rgba(0, 255, 136, 0.12);
+  --volt-brand-glow: rgba(0, 255, 136, 0.25);
 
   /* Trading signals */
   --volt-long: #00E5A0;
@@ -101,8 +101,8 @@ body::before {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139, 92, 246, 0.06), transparent),
-    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(0, 229, 160, 0.03), transparent),
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0, 255, 136, 0.04), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(0, 255, 136, 0.02), transparent),
     radial-gradient(ellipse 50% 50% at 10% 60%, rgba(6, 182, 212, 0.02), transparent);
   pointer-events: none;
 }
@@ -157,7 +157,7 @@ input[type="range"]::-webkit-slider-thumb {
   border-radius: 50%;
   background: white;
   cursor: pointer;
-  box-shadow: 0 0 12px rgba(139, 92, 246, 0.3), 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.3), 0 2px 8px rgba(0, 0, 0, 0.5);
   border: 2px solid var(--volt-brand);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
@@ -173,7 +173,7 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 50%;
   background: white;
   cursor: pointer;
-  box-shadow: 0 0 12px rgba(139, 92, 246, 0.3), 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.3), 0 2px 8px rgba(0, 0, 0, 0.5);
   border: 2px solid var(--volt-brand);
 }
 
@@ -247,11 +247,74 @@ input[type="range"]::-moz-range-thumb {
 .wallet-adapter-button:hover {
   background: var(--surface-4) !important;
   border-color: rgba(255, 255, 255, 0.15) !important;
-  box-shadow: 0 0 20px rgba(139, 92, 246, 0.1) !important;
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.1) !important;
+}
+
+/* ── Landing page grid ─────────────────────────────── */
+@keyframes grid-scroll {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(80px); }
+}
+
+@keyframes scanline {
+  0% { top: -4px; }
+  100% { top: 100%; }
+}
+
+@keyframes flicker {
+  0%, 95%, 100% { opacity: 1; }
+  96% { opacity: 0.8; }
+  97% { opacity: 1; }
+  98% { opacity: 0.6; }
+}
+
+@keyframes terminal-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.landing-grid {
+  background-image:
+    linear-gradient(rgba(0, 255, 136, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 136, 0.03) 1px, transparent 1px);
+  background-size: 80px 80px;
+  animation: grid-scroll 8s linear infinite;
+}
+
+.scanline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.06), transparent);
+  animation: scanline 4s linear infinite;
+  pointer-events: none;
+}
+
+.font-display {
+  font-family: var(--font-syne), system-ui, sans-serif;
+}
+
+.text-volt {
+  color: #00FF88;
+}
+
+.glow-text {
+  text-shadow: 0 0 40px rgba(0, 255, 136, 0.3), 0 0 80px rgba(0, 255, 136, 0.1);
+}
+
+.glow-border {
+  box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.15), 0 0 30px rgba(0, 255, 136, 0.05);
+}
+
+.terminal-cursor::after {
+  content: "_";
+  animation: terminal-blink 1s step-end infinite;
 }
 
 .wallet-adapter-button-trigger {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(139, 92, 246, 0.1)) !important;
-  border-color: rgba(139, 92, 246, 0.3) !important;
-  color: #C4B5FD !important;
+  background: linear-gradient(135deg, rgba(0, 255, 136, 0.15), rgba(0, 255, 136, 0.1)) !important;
+  border-color: rgba(0, 255, 136, 0.3) !important;
+  color: #66FFB2 !important;
 }

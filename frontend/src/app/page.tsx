@@ -1,406 +1,404 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { useAnchorWallet } from "@solana/wallet-adapter-react";
-import { PublicKey, Connection, Keypair, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { BN, Program, AnchorProvider } from "@coral-xyz/anchor";
-import { motion, AnimatePresence } from "framer-motion";
-import { useOraclePrice } from "@/hooks/useOraclePrice";
-import { useSessionKey } from "@/hooks/useSessionKey";
-import { useRoundManager, RoundPhase, getPositionPda, getMarketPda } from "@/hooks/useRoundManager";
-import { MARKETS, Market } from "@/lib/markets";
-import MarketGrid, { ActiveTradeState } from "@/components/MarketGrid";
-import AgentOrb from "@/components/AgentOrb";
-import { PROGRAM_ID, ER_DIRECT_RPC, SOL_USD_ORACLE_PDA } from "@/lib/constants";
-import idl from "@/idl/volt.json";
+import Link from "next/link";
+import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 
-const PROGRAM_PUBKEY = new PublicKey(PROGRAM_ID);
-const ORACLE_PDA = new PublicKey(SOL_USD_ORACLE_PDA);
-
-interface ActivePosition {
-  direction: "long" | "short";
-  leverage: number;
-  collateral: number;
-  contracts: number;
-  entryPrice: number;
-  positionPda: PublicKey;
-}
-
-interface SettledResult {
-  direction: "long" | "short";
-  leverage: number;
-  collateral: number;
-  contracts: number;
-  entryPrice: number;
-  exitPrice: number;
-  pnl: number;
-  ticks: number;
-}
-
-/* ── Animated VOLT logo mark ────────────────────────── */
-function VoltLogo() {
+/* ── Countdown ticker ─────────────────────────────── */
+function RoundCountdown() {
+  const [seconds, setSeconds] = useState(30);
+  useEffect(() => {
+    const id = setInterval(() => setSeconds((s) => (s <= 1 ? 30 : s - 1)), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const pct = ((30 - seconds) / 30) * 100;
   return (
-    <div className="flex items-center gap-2.5">
-      <div className="relative">
-        {/* Glow behind */}
-        <div className="absolute inset-0 rounded-lg bg-[var(--volt-brand)] blur-lg opacity-30" />
-        <div className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-violet-700 flex items-center justify-center shadow-lg shadow-violet-500/20">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M9.5 1L4 9h4l-1.5 6L12 7H8L9.5 1z" fill="white" strokeLinejoin="round" />
-          </svg>
-        </div>
+    <div className="flex items-center gap-3 font-mono text-sm">
+      <div className="relative w-32 h-1.5 rounded-full bg-[var(--surface-3)] overflow-hidden">
+        <motion.div
+          className="absolute inset-y-0 left-0 rounded-full bg-[#00FF88]"
+          style={{ width: `${pct}%` }}
+          transition={{ duration: 0.3 }}
+        />
       </div>
-      <div>
-        <h1 className="text-lg font-bold tracking-tight text-white leading-none">VOLT</h1>
-        <p className="text-[9px] text-[var(--muted-foreground)] tracking-[0.2em] uppercase leading-none mt-0.5">Micro-Futures</p>
-      </div>
-    </div>
-  );
-}
-
-/* ── Session status indicator ───────────────────────── */
-function SessionIndicator({ isActive, isExpired, createSession }: {
-  isActive: boolean;
-  isExpired: boolean;
-  createSession: () => void;
-}) {
-  if (isActive) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--volt-long-dim)] border border-[rgba(0,229,160,0.15)]">
-        <div className="w-1.5 h-1.5 rounded-full bg-[var(--volt-long)] animate-breathe" />
-        <span className="text-[11px] font-medium text-[var(--volt-long)]">Session Active</span>
-      </div>
-    );
-  }
-
-  return (
-    <button
-      onClick={createSession}
-      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--surface-3)] border border-[var(--border)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-4)] transition-all duration-200"
-    >
-      <div className={`w-1.5 h-1.5 rounded-full ${isExpired ? "bg-[var(--volt-short)]" : "bg-[var(--muted-foreground)]"}`} />
-      <span className="text-[11px] font-medium text-[var(--muted-foreground)]">
-        {isExpired ? "Renew Session" : "Create Session"}
+      <span className="text-[#00FF88] tabular-nums font-semibold tracking-wider">
+        {String(seconds).padStart(2, "0")}s
       </span>
-    </button>
-  );
-}
-
-/* ── Live stats bar ─────────────────────────────────── */
-function StatsBar({ marketsCount }: { marketsCount: number }) {
-  return (
-    <div className="flex items-center gap-4 text-[10px] font-mono text-[var(--muted-foreground)]">
-      <div className="flex items-center gap-1.5">
-        <div className="w-1 h-1 rounded-full bg-[var(--volt-long)] animate-breathe" />
-        <span>{marketsCount} Markets Live</span>
-      </div>
-      <div className="h-3 w-px bg-[var(--border)]" />
-      <span>30s Rounds</span>
-      <div className="h-3 w-px bg-[var(--border)]" />
-      <span>Ephemeral Rollup</span>
     </div>
   );
 }
 
-export default function TradingPage() {
-  const wallet = useAnchorWallet();
-  const [selectedMarket, setSelectedMarket] = useState<Market>(MARKETS[0]);
-  const { price } = useOraclePrice(selectedMarket);
-  const { isActive, isExpired, createSession } = useSessionKey();
-  const { round, startRound, getErProgram } = useRoundManager(selectedMarket.symbol);
-  const [leverage, setLeverage] = useState<number>(2);
-  const [margin, setMargin] = useState<string>("");
-  const [tradeMessage, setTradeMessage] = useState<string>("");
-  const [tradeLoading, setTradeLoading] = useState(false);
-  const [position, setPosition] = useState<ActivePosition | null>(null);
-  const [settledResult, setSettledResult] = useState<SettledResult | null>(null);
-  const prevPhaseRef = useRef<RoundPhase>("idle");
-  const pendingTradeRef = useRef<{ direction: "long" | "short" } | null>(null);
+/* ── Typewriter line ───────────────────────────────── */
+function TypedLine({
+  prompt,
+  command,
+  output,
+  delay,
+}: {
+  prompt: React.ReactNode;
+  command: string;
+  output?: React.ReactNode;
+  delay: number;
+}) {
+  const [typed, setTyped] = useState("");
+  const [showOutput, setShowOutput] = useState(false);
 
-  // Countdown timer
-  const [timer, setTimer] = useState(30);
   useEffect(() => {
-    if (round.phase !== "open" || !round.endTime) {
-      setTimer(round.phase === "idle" ? 30 : 0);
-      return;
-    }
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil(round.endTime - Date.now() / 1000));
-      setTimer(remaining);
-    }, 200);
-    return () => clearInterval(interval);
-  }, [round.phase, round.endTime]);
-
-  // PnL calculator
-  function calcAmplifiedPnl(
-    entryPrice: number, exitPrice: number, direction: "long" | "short",
-    lev: number, contracts: number, market: Market
-  ): { pnl: number; ticks: number } {
-    if (entryPrice === 0) return { pnl: 0, ticks: 0 };
-    const diff = exitPrice - entryPrice;
-    const ticks = (diff * 10000) / (entryPrice * market.tickSizeBps);
-    const directedTicks = direction === "long" ? ticks : -ticks;
-    const pnl = directedTicks * market.tickValue * contracts * lev;
-    return { pnl, ticks: directedTicks };
-  }
-
-  // Settlement when round closes
-  useEffect(() => {
-    if (
-      (prevPhaseRef.current === "settling" || prevPhaseRef.current === "open") &&
-      round.phase === "closed" && position
-    ) {
-      const exitPrice = round.endPrice > 0 ? round.endPrice : price;
-      const { pnl, ticks } = calcAmplifiedPnl(
-        position.entryPrice, exitPrice, position.direction,
-        position.leverage, position.contracts, selectedMarket
-      );
-      const maxProfit = position.collateral * 10;
-      const cappedPnl = Math.max(-position.collateral, Math.min(maxProfit, pnl));
-
-      setSettledResult({
-        direction: position.direction, leverage: position.leverage,
-        collateral: position.collateral, contracts: position.contracts,
-        entryPrice: position.entryPrice, exitPrice, pnl: cappedPnl, ticks,
-      });
-      setPosition(null);
-    }
-    prevPhaseRef.current = round.phase;
-  }, [round.phase, round.endPrice, position, price, selectedMarket]);
-
-  // Live unrealized PnL
-  const unrealizedPnl =
-    position && price > 0
-      ? (() => {
-          const { pnl } = calcAmplifiedPnl(
-            position.entryPrice, price, position.direction,
-            position.leverage, position.contracts, selectedMarket
-          );
-          return Math.max(-position.collateral, Math.min(position.collateral * 10, pnl));
-        })()
-      : null;
-
-  // When round transitions to "open" and we have a pending trade, fire it
-  useEffect(() => {
-    if (round.phase === "open" && pendingTradeRef.current && !position) {
-      const { direction } = pendingTradeRef.current;
-      pendingTradeRef.current = null;
-      openPosition(direction);
-    }
-  }, [round.phase, position]);
-
-  const openPosition = useCallback(
-    async (direction: "long" | "short") => {
-      if (!wallet || !round.roundPda) return;
-
-      setTradeLoading(true);
-      setTradeMessage("");
-      setSettledResult(null);
-
-      try {
-        const erConn = new Connection(ER_DIRECT_RPC);
-        const erProvider = new AnchorProvider(erConn, wallet, { commitment: "confirmed" });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const erProgram = new Program(idl as any, erProvider);
-
-        const tempKeypair = Keypair.fromSeed(wallet.publicKey.toBytes());
-        const marginValue = parseFloat(margin);
-        const collateralRaw = new BN(Math.floor(marginValue * 1e6));
-        const contracts = Math.floor(marginValue / selectedMarket.marginPerContract);
-
-        const positionPda = getPositionPda(round.roundPda, tempKeypair.publicKey);
-        const marketPda = getMarketPda(selectedMarket.symbol);
-        const directionArg = direction === "long" ? { long: {} } : { short: {} };
-
-        const tx: Transaction = await erProgram.methods
-          .openPosition(directionArg, leverage, collateralRaw, false)
-          .accounts({
-            round: round.roundPda,
-            market: marketPda,
-            position: positionPda,
-            priceFeed: ORACLE_PDA,
-            signer: tempKeypair.publicKey,
-            systemProgram: PublicKey.default,
-          })
-          .transaction();
-
-        tx.add(
-          new TransactionInstruction({
-            programId: new PublicKey("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"),
-            keys: [],
-            data: Buffer.from(crypto.getRandomValues(new Uint8Array(5))),
-          })
-        );
-
-        const { blockhash, lastValidBlockHeight } = await erConn.getLatestBlockhash();
-        tx.recentBlockhash = blockhash;
-        tx.feePayer = tempKeypair.publicKey;
-        tx.sign(tempKeypair);
-
-        const signature = await erConn.sendRawTransaction(tx.serialize(), { skipPreflight: true });
-        await erConn.confirmTransaction({ blockhash, lastValidBlockHeight, signature }, "confirmed");
-
-        setPosition({
-          direction, leverage, collateral: marginValue,
-          contracts, entryPrice: price, positionPda,
-        });
-        setTradeMessage("");
-        setMargin("");
-      } catch (err: unknown) {
-        console.error("[openPosition]", err);
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes("already in use")) {
-          setTradeMessage("Already have a position this round");
-        } else {
-          setTradeMessage(`Error: ${msg.slice(0, 80)}`);
+    let i = 0;
+    const startTimeout = setTimeout(() => {
+      const iv = setInterval(() => {
+        i++;
+        setTyped(command.slice(0, i));
+        if (i >= command.length) {
+          clearInterval(iv);
+          if (output) setTimeout(() => setShowOutput(true), 300);
         }
-      } finally {
-        setTradeLoading(false);
-      }
-    },
-    [wallet, round.roundPda, margin, leverage, price, selectedMarket]
-  );
-
-  async function handleMarketTrade(market: Market, direction: "long" | "short", lev: number, marginAmount: number) {
-    setSelectedMarket(market);
-    setSettledResult(null);
-    setLeverage(lev);
-    setMargin(String(marginAmount));
-
-    if (!wallet) { setTradeMessage("Connect wallet first"); return; }
-    if (!isActive) { setTradeMessage("Create session first"); return; }
-    if (position) { setTradeMessage("Already have a position this round"); return; }
-    if (marginAmount < market.marginPerContract) {
-      setTradeMessage(`Min margin: $${market.marginPerContract}`);
-      return;
-    }
-
-    if (round.phase === "open") {
-      openPosition(direction);
-    } else if (round.phase === "idle" || round.phase === "closed") {
-      setTradeMessage("Creating round...");
-      pendingTradeRef.current = { direction };
-      await startRound(market.symbol);
-    } else {
-      setTradeMessage("Round is being created, please wait...");
-    }
-  }
-
-  // ── Build activeTrade state to pass into MarketGrid ────
-  const activeTrade: ActiveTradeState | null = (() => {
-    if (pendingTradeRef.current && (round.phase === "creating" || round.phase === "delegating")) {
-      return {
-        marketSymbol: selectedMarket.symbol,
-        direction: pendingTradeRef.current.direction,
-        leverage,
-        collateral: parseFloat(margin) || 0,
-        contracts: Math.floor((parseFloat(margin) || 0) / selectedMarket.marginPerContract),
-        entryPrice: 0,
-        phase: "creating" as const,
-        timer: 30,
-        unrealizedPnl: null,
-        settledPnl: null,
-        settledTicks: null,
-        message: tradeMessage || "Creating round...",
-      };
-    }
-
-    if (position) {
-      const phase: ActiveTradeState["phase"] =
-        round.phase === "settling" ? "settling" : "open";
-      return {
-        marketSymbol: selectedMarket.symbol,
-        direction: position.direction,
-        leverage: position.leverage,
-        collateral: position.collateral,
-        contracts: position.contracts,
-        entryPrice: position.entryPrice,
-        phase,
-        timer,
-        unrealizedPnl,
-        settledPnl: null,
-        settledTicks: null,
-        message: "",
-      };
-    }
-
-    if (settledResult) {
-      return {
-        marketSymbol: selectedMarket.symbol,
-        direction: settledResult.direction,
-        leverage: settledResult.leverage,
-        collateral: settledResult.collateral,
-        contracts: settledResult.contracts,
-        entryPrice: settledResult.entryPrice,
-        phase: "settled" as const,
-        timer: 0,
-        unrealizedPnl: null,
-        settledPnl: settledResult.pnl,
-        settledTicks: settledResult.ticks,
-        message: "",
-      };
-    }
-
-    return null;
-  })();
+      }, 45);
+      return () => clearInterval(iv);
+    }, delay);
+    return () => clearTimeout(startTimeout);
+  }, [command, delay, output]);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* ── Header ─────────────────────────────────────── */}
-      <motion.header
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: "easeOut" }}
-        className="sticky top-0 z-40 glass border-b border-[var(--border)]"
-      >
-        <div className="flex items-center justify-between px-6 py-3 max-w-[1440px] mx-auto w-full">
-          <div className="flex items-center gap-8">
-            <VoltLogo />
-            <StatsBar marketsCount={MARKETS.length} />
-          </div>
-          <div className="flex items-center gap-3">
-            <SessionIndicator isActive={isActive} isExpired={isExpired} createSession={createSession} />
-            <WalletMultiButton />
-          </div>
-        </div>
-      </motion.header>
-
-      {/* ── Trade message toast ─────────────────────────── */}
-      <AnimatePresence>
-        {tradeMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: -12, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -12, scale: 0.95 }}
-            transition={{ duration: 0.25 }}
-            className="fixed top-16 left-1/2 -translate-x-1/2 z-50"
-          >
-            <div className={`
-              rounded-xl px-4 py-2.5 text-xs font-medium backdrop-blur-xl shadow-2xl
-              ${tradeMessage.startsWith("Error")
-                ? "bg-[var(--volt-short-dim)] text-[var(--volt-short)] border border-[rgba(255,71,87,0.2)]"
-                : "bg-[var(--volt-brand-dim)] text-violet-300 border border-[rgba(139,92,246,0.2)]"
-              }
-            `}>
-              {tradeMessage}
-            </div>
-          </motion.div>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-0 flex-wrap">
+        {prompt}
+        <span className="text-white/80">{typed}</span>
+        {typed.length < command.length && (
+          <span className="w-[7px] h-[14px] bg-[#00FF88]/70 inline-block ml-px animate-breathe" />
         )}
-      </AnimatePresence>
+      </div>
+      {showOutput && output}
+    </div>
+  );
+}
 
-      {/* ── Main content ───────────────────────────────── */}
-      <motion.main
+/* ── Live price with jitter ───────────────────────── */
+function LivePrice() {
+  const [price, setPrice] = useState(148.32);
+  const [delta, setDelta] = useState(0);
+  const [history, setHistory] = useState<number[]>(() =>
+    Array.from({ length: 24 }, (_, i) => 145 + Math.sin(i * 0.5) * 3 + Math.random() * 2)
+  );
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setPrice((p) => {
+        const change = (Math.random() - 0.48) * 0.15;
+        const next = Math.round((p + change) * 100) / 100;
+        setDelta(change);
+        setHistory((h) => [...h.slice(1), next]);
+        return next;
+      });
+    }, 1200);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Spark SVG
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const range = max - min || 1;
+  const points = history
+    .map((v, i) => `${(i / (history.length - 1)) * 120},${28 - ((v - min) / range) * 24}`)
+    .join(" ");
+
+  return (
+    <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col gap-1">
+        <div className="flex items-baseline gap-2">
+          <span
+            className="font-mono text-3xl font-bold tabular-nums transition-colors duration-150"
+            style={{ color: delta >= 0 ? "#00FF88" : "#FF4757" }}
+          >
+            ${price.toFixed(2)}
+          </span>
+          <span
+            className="text-xs font-mono font-semibold tabular-nums"
+            style={{ color: delta >= 0 ? "#00FF88" : "#FF4757" }}
+          >
+            {delta >= 0 ? "+" : ""}
+            {((delta / price) * 100).toFixed(2)}%
+          </span>
+        </div>
+      </div>
+      <svg width={120} height={28} className="opacity-60">
+        <polyline
+          points={points}
+          fill="none"
+          stroke={delta >= 0 ? "#00FF88" : "#FF4757"}
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  );
+}
+
+/* ── Terminal prompt ───────────────────────────────── */
+function TermPrompt() {
+  return (
+    <span className="mr-1.5 shrink-0">
+      <span className="text-[#00FF88]">volt</span>
+      <span className="text-white/30">@</span>
+      <span className="text-[var(--volt-cyan)]">solana</span>
+      <span className="text-white/30"> ~ $ </span>
+    </span>
+  );
+}
+
+/* ── Feature row ──────────────────────────────────── */
+const FEATURES = [
+  {
+    tag: "01",
+    title: "30-Second Rounds",
+    desc: "Perpetual futures that settle every 30 seconds. No funding rates. No overnight risk.",
+  },
+  {
+    tag: "02",
+    title: "Up to 20x Leverage",
+    desc: "Amplify conviction on SOL, BTC, ETH with capital-efficient micro-contracts.",
+  },
+  {
+    tag: "03",
+    title: "Ephemeral Rollup",
+    desc: "Instant execution on an ephemeral rollup, settled back to Solana L1.",
+  },
+  {
+    tag: "04",
+    title: "AI Agent",
+    desc: "Chat to place trades, get analysis, and execute strategies hands-free.",
+  },
+];
+
+export default function LandingPage() {
+  return (
+    <div className="min-h-screen flex flex-col relative overflow-hidden">
+      {/* ── Background grid + scanline ── */}
+      <div className="fixed inset-0 landing-grid pointer-events-none" />
+      <div className="fixed inset-0 scanline pointer-events-none" />
+
+      {/* ── Top accent line ── */}
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-[#00FF88]/30 to-transparent" />
+
+      {/* ── Nav ── */}
+      <motion.nav
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.15 }}
-        className="flex-1 px-4 py-6 max-w-[1440px] mx-auto w-full"
+        transition={{ duration: 0.5 }}
+        className="relative z-40 border-b border-[var(--border)]"
       >
-        <MarketGrid onTrade={handleMarketTrade} activeTrade={activeTrade} />
-      </motion.main>
+        <div className="flex items-center justify-between px-6 sm:px-10 py-4 max-w-[1400px] mx-auto w-full">
+          <div className="flex items-center gap-3">
+            {/* Logo mark — sharp square with bolt */}
+            <div className="relative">
+              <div className="w-8 h-8 bg-[#00FF88] rounded-sm flex items-center justify-center">
+                <svg width={14} height={14} viewBox="0 0 16 16" fill="none">
+                  <path d="M9.5 1L4 9h4l-1.5 6L12 7H8L9.5 1z" fill="#07070A" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <div className="absolute -inset-1 bg-[#00FF88]/20 rounded-sm blur-md -z-10" />
+            </div>
+            <span className="font-display text-lg font-extrabold tracking-tight text-white">VOLT</span>
+          </div>
 
-      {/* ── Agent Orb ──────────────────────────────────── */}
-      <AgentOrb onTrade={handleMarketTrade} />
+          <div className="flex items-center gap-6">
+            <RoundCountdown />
+            <Link
+              href="/markets"
+              className="px-5 py-2 rounded-sm bg-[#00FF88] text-[#07070A] text-sm font-bold tracking-wide hover:bg-[#33FF99] transition-colors duration-150"
+            >
+              Launch App
+            </Link>
+          </div>
+        </div>
+      </motion.nav>
+
+      {/* ── Hero ── */}
+      <section className="relative z-10 flex-1 flex items-center px-6 sm:px-10 py-20 sm:py-32 max-w-[1400px] mx-auto w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 lg:gap-24 w-full items-center">
+          {/* Left — copy */}
+          <motion.div
+            initial={{ opacity: 0, x: -30 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.7, delay: 0.1 }}
+            className="flex flex-col gap-8"
+          >
+            {/* Status badge */}
+            <div className="flex items-center gap-2 w-fit">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#00FF88] animate-breathe" />
+              <span className="text-xs font-mono uppercase tracking-[0.15em] text-[var(--muted-foreground)]">
+                Live on Solana Devnet
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <h2 className="font-display text-5xl sm:text-6xl lg:text-7xl font-extrabold text-white leading-[0.95] tracking-tight">
+                Trade Perps
+                <br />
+                in <span className="text-volt glow-text">30s</span>
+              </h2>
+              <p className="text-base sm:text-lg text-[var(--muted-foreground)] max-w-md leading-relaxed">
+                Micro-futures on Solana. Leveraged positions that open and settle
+                in a single 30-second round.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <Link
+                href="/markets"
+                className="group relative px-8 py-3.5 rounded-sm bg-[#00FF88] text-[#07070A] font-bold tracking-wide hover:bg-[#33FF99] transition-colors duration-150 text-sm"
+              >
+                Start Trading
+                <span className="absolute inset-0 rounded-sm bg-[#00FF88]/20 blur-xl -z-10 group-hover:bg-[#00FF88]/30 transition-colors" />
+              </Link>
+              <a
+                href="https://github.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-8 py-3.5 rounded-sm border border-[var(--border)] text-[var(--foreground)] font-semibold hover:border-[#00FF88]/30 hover:text-[#00FF88] transition-all duration-200 text-sm"
+              >
+                Read Docs
+              </a>
+            </div>
+          </motion.div>
+
+          {/* Right — terminal-style stats card */}
+          <motion.div
+            initial={{ opacity: 0, x: 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.7, delay: 0.3 }}
+            className="relative"
+          >
+            <div className="glow-border rounded-sm bg-[var(--surface-1)] border border-[var(--border)] overflow-hidden">
+              {/* Terminal header */}
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-[var(--border)] bg-[var(--surface-0)]">
+                <div className="flex gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-[var(--volt-short)]" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-[var(--volt-amber)]" />
+                  <div className="w-2.5 h-2.5 rounded-full bg-[var(--volt-long)]" />
+                </div>
+                <span className="text-[10px] font-mono text-[var(--muted-foreground)] ml-2 uppercase tracking-widest">
+                  volt_terminal
+                </span>
+              </div>
+
+              {/* Terminal body */}
+              <div className="p-5 sm:p-6 flex flex-col gap-4 font-mono text-xs leading-relaxed">
+                {/* Line 1: fetch price */}
+                <TypedLine
+                  delay={600}
+                  prompt={<TermPrompt />}
+                  command="fetch SOL-PERP --live"
+                  output={
+                    <div className="mt-2 pl-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10px] uppercase tracking-[0.2em] text-[var(--muted-foreground)]">SOL-PERP</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-[#00FF88]/10 text-[#00FF88] border border-[#00FF88]/20">LIVE</span>
+                      </div>
+                      <LivePrice />
+                      <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-[var(--border)]">
+                        <div className="flex flex-col">
+                          <span className="text-[var(--muted-foreground)] text-[10px]">24h Vol</span>
+                          <span className="text-white/80">$2.4M</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[var(--muted-foreground)] text-[10px]">Open Int.</span>
+                          <span className="text-white/80">$890K</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[var(--muted-foreground)] text-[10px]">Rounds</span>
+                          <span className="text-white/80">2,847</span>
+                        </div>
+                      </div>
+                    </div>
+                  }
+                />
+
+                <div className="h-px w-full bg-[var(--border)]" />
+
+                {/* Line 2: open position */}
+                <TypedLine
+                  delay={3500}
+                  prompt={<TermPrompt />}
+                  command="open long SOL 10x --size 50"
+                  output={
+                    <div className="mt-1.5 flex flex-col gap-1">
+                      <span className="text-[var(--volt-long)]">
+                        ✓ Position opened: LONG SOL-PERP 10x
+                      </span>
+                      <span className="text-[var(--muted-foreground)]">
+                        Size: 50 USDC · Entry: $148.32 · Round #2848
+                      </span>
+                    </div>
+                  }
+                />
+
+                <div className="h-px w-full bg-[var(--border)]" />
+
+                {/* Line 3: waiting cursor */}
+                <TypedLine
+                  delay={6500}
+                  prompt={<TermPrompt />}
+                  command="status --watch"
+                  output={
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--volt-amber)] animate-breathe" />
+                      <span className="text-[var(--volt-amber)]">Watching round #2848... 18s remaining</span>
+                    </div>
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Decorative corner marks */}
+            <div className="absolute -top-2 -left-2 w-4 h-4 border-t border-l border-[#00FF88]/30" />
+            <div className="absolute -top-2 -right-2 w-4 h-4 border-t border-r border-[#00FF88]/30" />
+            <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b border-l border-[#00FF88]/30" />
+            <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b border-r border-[#00FF88]/30" />
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── Features ── */}
+      <section className="relative z-10 px-6 sm:px-10 py-20 max-w-[1400px] mx-auto w-full border-t border-[var(--border)]">
+        <motion.div
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5 }}
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-[var(--border)]"
+        >
+          {FEATURES.map((f, i) => (
+            <motion.div
+              key={f.tag}
+              initial={{ opacity: 0, y: 16 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.4, delay: i * 0.1 }}
+              className="bg-[var(--surface-0)] p-6 sm:p-8 flex flex-col gap-4 group hover:bg-[var(--surface-1)] transition-colors duration-300"
+            >
+              <span className="font-mono text-xs text-[#00FF88]/50 tracking-widest">{f.tag}</span>
+              <h3 className="font-display text-base font-bold text-white group-hover:text-[#00FF88] transition-colors duration-300">
+                {f.title}
+              </h3>
+              <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">{f.desc}</p>
+            </motion.div>
+          ))}
+        </motion.div>
+      </section>
+
+      {/* ── Footer ── */}
+      <footer className="relative z-10 border-t border-[var(--border)]">
+        <div className="h-px w-full bg-gradient-to-r from-transparent via-[#00FF88]/20 to-transparent" />
+        <div className="max-w-[1400px] mx-auto flex items-center justify-between px-6 sm:px-10 py-6 text-[11px] font-mono text-[var(--muted-foreground)] tracking-wide">
+          <span>VOLT PROTOCOL</span>
+          <span className="flex items-center gap-2">
+            <span className="w-1 h-1 rounded-full bg-[#00FF88]" />
+            SOLANA
+          </span>
+        </div>
+      </footer>
     </div>
   );
 }
