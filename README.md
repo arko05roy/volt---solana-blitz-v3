@@ -69,7 +69,7 @@ This means a 0.1% SOL move at 10x leverage on a 1-contract SOL position returns 
 
 **Agent Economy.** A natural language strategy is parsed by Groq `llama-3.1-8b-instant` into a typed `AgentParams` struct. The agent runs a loop: each new round triggers one `open_position` call using the session keypair. Agents and humans execute against the same pool, read the same oracle, and are ranked on the same SOAR leaderboard. No separate agent infrastructure — the ER handles both.
 
-**Private Pool Entry.** Deposit and withdrawal routes proxy to MagicBlock's Private Payments API, backed by Intel TDX Private Ephemeral Rollups. Pool entry amount and wallet identity are not visible to other traders at the base layer.
+**Private Trade Routing.** When Volt routes a position through an external perp venue, the routing details — venue selection, order size, wallet identity — would normally be visible on-chain to other market participants. MagicBlock's Private Payments API, backed by Intel TDX Private Ephemeral Rollups, executes the collateral transfer and venue routing inside a private ER. Other traders see the settled outcome on L1 but not the routing intent — eliminating front-running and copycat risk.
 
 ---
 
@@ -117,17 +117,29 @@ volt/
 
 ## MagicBlock Integration
 
-| Service | Role | Files |
-|---|---|---|
-| **Ephemeral Rollups** | Round delegation/undelegation; all position execution happens on ER | `web3/programs/volt/src/lib.rs` (raw CPI), `src/hooks/useRoundManager.ts` |
-| **Pricing Oracle (Pyth Lazer)** | SOL/USD feed read at offset 73 of PDA `9Uz4aJ2LKfc6Dt4zByG6qRDVtGbHC2ZBHissoc9x343P`; live only on ER (returns 0 on base) | `web3/programs/volt/src/lib.rs` (`read_oracle_price`), `src/hooks/useOraclePrice.ts` |
-| **Session Keys** | `useSessionKeyManager(anchorWallet, connection, "devnet")` — scoped keypair for gasless trading | `src/app/providers.tsx`, `src/hooks/useSessionKey.ts` |
-| **Cranks** | Time-triggered round settlement at `end_time` | `web3/programs/volt/src/lib.rs` (`settle_round` crank instruction) |
-| **SOAR** | `@magicblock-labs/soar-sdk` — leaderboard init, score recording after each round | `frontend/scripts/setup-soar.ts`, `src/hooks/useSoarLeaderboard.ts` |
-| **VRF** | `VRFzLsXSiuF2BN6fwEf8yJJANW2PBGnY6W2FMqSe1wk` — bonus multiplier callback | `web3/programs/volt/src/lib.rs` (`callback_bonus`) |
-| **Private Payments API** | Pool entry privacy via Intel TDX PER | `src/app/api/private/deposit/route.ts`, `withdraw/route.ts`, `transfer/route.ts`, `balance/route.ts`, `src/hooks/usePrivatePayments.ts` |
+| Service | Role |
+|---|---|
+| **Ephemeral Rollups** | Round delegation/undelegation; all position execution happens on ER at sub-50ms latency |
+| **Pricing Oracle (Pyth Lazer)** | SOL/USD feed read at offset 73 of oracle PDA; live only on ER (returns 0 on base) |
+| **Session Keys** | Scoped session keypair via MagicBlock SDK — gasless, popup-free trading for the session duration |
+| **Cranks** | Time-triggered round settlement at epoch expiry |
+| **SOAR** | On-chain leaderboard — humans and AI agents ranked by cumulative PnL |
+| **VRF** | Verifiable randomness callback — assigns 1x/2x/3x bonus multiplier per trade |
+| **Private Payments API** | Trade routing privacy via Intel TDX Private Ephemeral Rollups |
 
-**Note on Rust SDK:** `ephemeral-rollups-sdk` crate dropped due to unresolved version conflict (`solana-instruction v2` vs `v3` against `anchor-lang 0.32.1`). Delegation implemented via raw manual CPI following the exact protocol: copy data → buffer PDA, zero round data, `assign(system_program)`, `invoke_signed(system_instruction::assign(round, delegation_program))`, CPI to delegation program. Confirmed working at slot 452907347.
+### Ephemeral Rollups
+
+Every trading round in Volt is delegated from base Solana to a MagicBlock Ephemeral Rollup for the duration of its 30-second epoch. The `delegate_round` instruction copies round account data into a buffer PDA, zeroes the round account, reassigns ownership to the MagicBlock delegation program via raw CPI, and invokes the delegation program to hand off writability to the ER. While delegated, all position execution (`open_position`, `callback_bonus`) runs on the ER at sub-50ms latency. The frontend maintains a dual-connection setup — a base Solana connection for round creation and a separate ER connection for polling delegated round state and submitting trades. When the round timer expires, `settle_round` undelegates the account back to base Solana via a `MagicContext` + `MagicProgram` CPI, at which point on-chain settlement and PnL distribution resume on L1.
+
+**Note on Rust SDK:** The `ephemeral-rollups-sdk` crate was dropped due to an unresolved version conflict (`solana-instruction v2` vs `v3` against `anchor-lang 0.32.1`). Delegation is implemented via raw manual CPI following the exact protocol: copy data → buffer PDA, zero round data, `assign(system_program)`, `invoke_signed(system_instruction::assign(round, delegation_program))`, CPI to delegation program. The TypeScript SDK (`@magicblock-labs/ephemeral-rollups-sdk`) is used on the frontend and in tests for connection helpers and delegation utilities.
+
+### SOAR Leaderboard
+
+Volt uses MagicBlock's SOAR to maintain a unified on-chain leaderboard where both human traders and AI agents are ranked by cumulative PnL. The SOAR game and leaderboard accounts are initialized on devnet with a setup script that creates the game, registers the leaderboard with a score format, and sets the program authority. After each settled round, the frontend submits the trader's PnL as a score to the leaderboard. The leaderboard page renders the full ranked list — displaying wallet, score, and whether the entry is a human or agent — pulling directly from the on-chain SOAR account.
+
+### Private Payments API
+
+Since Volt routes trades through existing Solana perp venues (Drift, Jupiter, Ardena, Zeta Markets, Mango), trade routing details — which venue a position is being routed to, the size of the order, and the trader's wallet identity — are normally visible on-chain to other market participants. This creates an information leakage problem: other traders can front-run or copy routes by watching Volt's on-chain activity. MagicBlock's Private Payments API, backed by Intel TDX Private Ephemeral Rollups, solves this by executing the collateral deposit, venue routing, and position transfer instructions inside a private ER where transaction data is shielded from public visibility. The trader's collateral enters the private ER, the route executes against the target venue, and only the final settled state is reconciled back to L1 — other participants see the outcome but not the routing intent. The frontend exposes deposit, withdraw, transfer, and balance operations that proxy through server-side API routes to the private ER endpoint.
 
 ---
 
