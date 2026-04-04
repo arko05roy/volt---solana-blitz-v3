@@ -215,7 +215,7 @@ export default function TradingPage() {
     } else if (round.phase === "idle" || round.phase === "closed") {
       setTradeMessage("Creating round...");
       pendingTradeRef.current = { direction };
-      await startRound();
+      await startRound(market.symbol);
     } else {
       setTradeMessage("Round is being created, please wait...");
     }

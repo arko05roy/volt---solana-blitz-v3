@@ -1,263 +1,187 @@
 # Volt ⚡
 
-> **30-second leveraged trading rounds on Ephemeral Rollups — trade manually or deploy AI agents that execute autonomously, all fully onchain.**
+Fully onchain perpetuals with 30-second settlement epochs, GMX-style liquidity pools, and autonomous AI agent trading — powered by MagicBlock Ephemeral Rollups.
 
-The $100B+ crypto derivatives market runs on centralized order books with 300-400ms latency, wallet popups on every trade, and zero agent interoperability. Volt replaces all of that with a single onchain primitive: a 30-second round that settles at sub-50ms speed, denominated in USDC, playable by humans and AI agents alike.
-
-**Live on Solana Devnet:** [`BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi`](https://explorer.solana.com/address/BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi?cluster=devnet)
-
----
-
-## The Problem
-
-Onchain perpetual trading is broken in exactly the ways that matter for real users:
-
-- **Latency:** Base Solana slots are 400ms. A 30-second trading round with per-trade confirmation is unplayable.
-- **UX friction:** Every position open/close triggers a wallet popup. Human traders abandon. AI agents can't operate.
-- **Agent blindness:** No existing onchain perp protocol exposes a structured interface for autonomous AI agents.
-- **Privacy gap:** Pool entry reveals your wallet strategy to every on-chain observer.
-
-Volt solves all four — not with off-chain compromises, but by running everything on MagicBlock Ephemeral Rollups.
-
----
-
-## How It Works
-
-Each **Volt Round** is a 30-second trading window on an Ephemeral Rollup:
-
-1. A round is created on base Solana and delegated to the ER — the round account is now executing at sub-50ms speed
-2. Traders open LONG or SHORT positions with 2x/5x/10x leverage against a GMX-style liquidity vault
-3. The Pyth Lazer oracle feeds live SOL/USD prices (50-200ms updates) into the ER for real-time PnL
-4. VRF fires on winning positions for a 1x/2x/3x bonus multiplier — provably random, not gameable
-5. When 30 seconds expire, Cranks trigger settlement: round undelegates back to base layer, PnL is distributed
-6. Session Keys mean users sign once per session — zero wallet popups during trading
-7. SOAR records every trade result onchain — humans and agents compete on the same persistent leaderboard
-
-**AI Agent Mode:** Type a strategy in plain English ("Go short with 5x leverage when price drops 0.3% in 10 seconds") → Groq `llama-3.1-8b-instant` parses it into structured params → the agent executes autonomously inside the ER, one trade per round, indefinitely.
-
----
-
-## MagicBlock Integration
-
-Every MagicBlock service is load-bearing. Remove any one and the demo breaks.
-
-| Service | Role in Volt | What Breaks Without It |
-|---|---|---|
-| **Ephemeral Rollups** | All trading executes on ER — round delegation, position matching, settlement | 400ms Solana slots make 30s rounds unplayable. Core premise collapses. |
-| **Pricing Oracle (Pyth Lazer)** | Live SOL/USD feed at 50-200ms inside the ER, used for PnL at settlement | No price data = can't settle trades. Rounds can never close. |
-| **Session Keys** | Users sign once per session; all subsequent trades use scoped session keypair | Every trade triggers a wallet popup. AI agents can't sign at all. Entire agent mode breaks. |
-| **Cranks** | Time-based automated trigger: fires settlement when `now >= round.end_time` | Rounds never expire. Manual settlement required. 30-second game becomes undefined. |
-| **SOAR** | Onchain leaderboard — persistent rankings across humans AND agents | No verifiable proof of trading performance. Competitive loop disappears. |
-| **VRF (Randomness)** | Provably fair bonus multiplier on winning trades (1x/2x/3x) | Multipliers become predictable/gameable. Memetic quality of trading evaporates. |
-
-**Files integrating MagicBlock:**
-- `src/hooks/useRoundManager.ts` — ER delegation/undelegation, Magic Router RPC routing
-- `src/hooks/useSessionKey.ts` — `useSessionKeyManager` from `@magicblock-labs/ephemeral-rollups-sdk`
-- `src/hooks/useSoarLeaderboard.ts` — `@magicblock-labs/soar-sdk` leaderboard queries
-- `src/hooks/useOraclePrice.ts` — reads Pyth Lazer PDA at offset 73 on ER direct RPC
-- `web3/programs/volt/src/lib.rs` — manual CPI delegation to `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`, `callback_bonus` VRF handler
-- `src/app/api/private/` — MagicBlock Private Payments API (deposit/withdraw/transfer/balance)
+[PLACEHOLDER: Live App] | [Program on Devnet](https://explorer.solana.com/address/BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi?cluster=devnet) | [SOAR Leaderboard](https://explorer.solana.com/address/3p4hEbGnLMDgFKLDbbGdZ9JdEmJgKWjTFh77MXesk56H?cluster=devnet)
 
 ---
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                      NEXT.JS FRONTEND                        │
-│   Wallet Connect → Market Grid → Trade UI → Agent Builder    │
-│                    → Leaderboard (SOAR)                      │
-├──────────────────────────────────────────────────────────────┤
-│                    NEXT.JS API ROUTES                        │
-│   /api/agent/parse   — Groq llama-3.1-8b parses strategy    │
-│   /api/agent/execute — Agent trade execution loop            │
-│   /api/private/*     — MagicBlock Private Payments proxy     │
-├──────────────────────────────────────────────────────────────┤
-│               MAGICBLOCK INFRASTRUCTURE                      │
-│                                                              │
-│  ┌──────────┐  ┌────────┐  ┌──────────┐  ┌──────┐  ┌─────┐ │
-│  │   ER     │  │ Oracle │  │ Session  │  │ SOAR │  │ VRF │ │
-│  │ Engine   │  │(Pyth   │  │  Keys   │  │      │  │     │ │
-│  │(Trading) │  │ Lazer) │  │         │  │      │  │     │ │
-│  └──────────┘  └────────┘  └──────────┘  └──────┘  └─────┘ │
-│       +Cranks (auto-settlement) +Private Payments API        │
-├──────────────────────────────────────────────────────────────┤
-│             ANCHOR PROGRAM (Solana Devnet)                   │
-│   Vault PDA → Market PDA → Round PDA → Position PDA         │
-│   Manual CPI delegation protocol (raw, no SDK conflicts)     │
-│   GMX-style pool model: LP deposits back all positions       │
-└──────────────────────────────────────────────────────────────┘
-```
+Volt separates execution across two trust domains:
 
-**Round lifecycle:**
-```
-create_round (base layer)
-  → delegate_round (CPI to DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh)
-    → open_position × N (on ER, sub-50ms)
-    → oracle reads Pyth Lazer price at expiry
-    → [VRF callback_bonus fires on winners]
-  → settle_round (undelegate + magic program CPI)
-    → distribute_pnl (base layer, USDC transfer)
-    → soar_record (SOAR leaderboard update)
-```
-
----
-
-## Comparison
-
-| Feature | dYdX / GMX | Volt |
+| Layer | Role | Trust Property |
 |---|---|---|
-| Execution latency | 50-400ms (CEX/L2/base L1) | Sub-50ms (Ephemeral Rollup) |
-| Wallet popups per trade | 1 per transaction | 0 (Session Keys, sign once) |
-| AI agent compatible | No structured interface | Yes — natural language → params → autonomous execution |
-| Round duration | No fixed rounds | 30s hard rounds, verifiable onchain |
-| Leaderboard | Off-chain / centralized | SOAR — fully onchain, humans + agents compete |
-| Pool entry privacy | Public wallet trail | MagicBlock Private Payments (Intel TDX PER) |
-| Settlement | Off-chain matching | Fully onchain via ER + Cranks |
+| **Base Layer (Solana)** | Vault custody, market state, final settlement | Funds move only via program instruction; PnL settled after undelegation |
+| **Ephemeral Rollup (MagicBlock)** | Position open/close, oracle reads, VRF callbacks, session key execution | Sub-50ms execution; state reconciled to L1 on every undelegate |
 
----
+The ER is not a bolt-on. A round delegated to the ER runs at 50ms. The same round on base Solana runs at 400ms slots — a 30-second epoch with 400ms slot time means approximately 75 confirmations per round. Unplayable without ER.
 
-## Markets
+Instructions (in order of execution):
 
-50+ markets across 7 categories — all with live Pyth Hermes price feeds:
-
-**Majors:** BTC, ETH, SOL, XRP, ADA, LINK, DOT, ATOM, TON, AVAX
-
-**Solana Ecosystem:** JUP, RAY, ORCA, JTO, PYTH, HNT, DRIFT, KMNO, W, GRASS, MNDE, ZEUS, TNSR, MOBILE
-
-**AI Tokens:** FET, TAO, RENDER, IO, ELIZAOS
-
-**DeFi:** AAVE, UNI, MKR, CRV, LDO, PENDLE, ONDO, ENA
-
-**Layer 1s:** SUI, APT, NEAR, SEI, TIA, INJ, FIL
-
-**Layer 2s:** ARB, OP, POL, STRK, MANTA
-
-**Meme:** DOGE, SHIB, PEPE, WIF, BONK, TRUMP, FARTCOIN, BOME, POPCAT, MEW
-
----
-
-## Onchain Deployments
-
-| Contract | Address | Network |
+| Instruction | Layer | Description |
 |---|---|---|
-| Volt Program | [`BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi`](https://explorer.solana.com/address/BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi?cluster=devnet) | Solana Devnet |
-| IDL Account | `GNR5mfywFrxzUReVAfbspE7yrxWj92hUdSLfxaGG6vBh` | Solana Devnet |
-| SOAR Game | [`GKWPKiofxmzg39UmefK4nGqB5Ahoi9aBMtMR6BBaP54f`](https://explorer.solana.com/address/GKWPKiofxmzg39UmefK4nGqB5Ahoi9aBMtMR6BBaP54f?cluster=devnet) | Solana Devnet |
-| SOAR Leaderboard | [`3p4hEbGnLMDgFKLDbbGdZ9JdEmJgKWjTFh77MXesk56H`](https://explorer.solana.com/address/3p4hEbGnLMDgFKLDbbGdZ9JdEmJgKWjTFh77MXesk56H?cluster=devnet) | Solana Devnet |
-| Test USDC Mint | `ATuzV4xZPYWB2hrmVZgcf1GrzcCCT6UtBUWtW7gH9VR1` | Solana Devnet |
-| Pyth Lazer Oracle | `9Uz4aJ2LKfc6Dt4zByG6qRDVtGbHC2ZBHissoc9x343P` | MagicBlock ER Devnet |
-| MagicBlock ER | `devnet-router.magicblock.app` | MagicBlock Devnet |
+| `initialize_vault` | Base | Create vault PDA, set authority, USDC mint |
+| `initialize_market` | Base | Create market PDA with symbol, oracle, tick params |
+| `deposit_liquidity` | Base | LP deposits USDC, receives VLP shares |
+| `withdraw_liquidity` | Base | LP burns VLP shares, receives USDC |
+| `create_round` | Base | Create round PDA, read oracle start price |
+| `delegate_round` | Base → ER | Delegate round account to ER via raw CPI |
+| `open_position` | ER | Open long/short — collateral reserved, VRF requested |
+| `callback_bonus` | ER | VRF callback — assigns 1x/2x/3x multiplier |
+| `settle_round` | ER → Base | Undelegate round, read oracle end price, emit settlement |
+| `settle_position` | Base | Compute PnL, release reserved liquidity |
+| `claim_winnings` | Base | Winner transfers PnL from vault |
+| `liquidate` | Base | Liquidate position if margin below threshold (90% lost) |
+
+PDAs (seeds → account):
+
+| Account | Seeds |
+|---|---|
+| Vault | `[b"vault"]` |
+| Market | `[b"market", symbol.as_bytes()]` |
+| Round Counter | `[b"round_counter", market.key()]` |
+| Round | `[b"round", market.key(), round_number.to_le_bytes()]` |
+| Position | `[b"position", round.key(), bidder.key()]` |
+| LP Position | `[b"lp", vault.key(), user.key()]` |
+| Delegation Buffer | `[b"buffer", round.key()]` — ephemeral, closed after delegation |
 
 ---
 
-## Verification
+## Key Mechanisms
 
-**153 tests across 5 suites — all passing**
+**30-Second Epochs.** Each trading round is a fixed 30-second window. The round account is created on base Solana, delegated to an ER (at which point it becomes writable only at ER speed), and undelegated on expiry via Crank-triggered settlement. Positions can only be opened while the round is in `Open` status on the ER.
 
-| Suite | Tests | What It Covers |
-|---|---|---|
-| `web3/tests/volt.ts` | 47 | Anchor program: pool init, round creation, ER delegation (raw CPI), oracle integration, VRF distribution, PnL math, liquidation |
-| `frontend/tests/api/agent-execute.test.ts` | 35 | Agent execution loop against live devnet — no mocks |
-| `frontend/tests/api/agent-parse.test.ts` | 31 | Groq strategy parsing: all direction/leverage/condition combinations, edge cases |
-| `frontend/tests/hooks/useRoundManager.test.ts` | 20 | Round lifecycle hooks: delegation state, phase transitions |
-| `frontend/tests/soar/leaderboard.test.ts` | 20 | SOAR integration: leaderboard reads, score recording on devnet |
+**GMX-Style Pool Model.** A single USDC vault backs all positions across all markets. LPs deposit USDC and receive VLP shares representing their proportional claim. The pool is the counterparty to every trade. When traders win, the pool pays; when traders lose, the pool earns. Max utilization is capped at 80% to protect LP principal. Max profit per position is capped at 10x collateral.
 
-**External integrations confirmed live:**
-- MagicBlock ER Devnet (`devnet-router.magicblock.app`) — price confirmed $121+ on ER, $0 on base
-- Pyth Lazer oracle (`9Uz4aJ2LKfc6Dt4zByG6qRDVtGbHC2ZBHissoc9x343P`) — live feed confirmed in tests
-- Groq API (`llama-3.1-8b-instant`) — strategy parse confirmed, latency <500ms
-- MagicBlock SOAR — 10 leaderboard entries live on devnet (confirmed in tests)
-- MagicBlock Delegation Program (`DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh`) — round delegation confirmed at slot 452907347
-
-**Technical decisions:**
-- Dropped `ephemeral-rollups-sdk` Rust crate (version conflict: `solana-instruction v2 vs v3` with `anchor-lang 0.32.1`) — delegation implemented via raw manual CPI following exact protocol spec
-- Oracle reads 8-byte LE u64 at offset 73 of Pyth Lazer price feed account — only returns live data on ER RPC, not base
-
----
-
-## AI Agent Mode
-
-**Build your trading agent in plain English:**
+**Amplified Tick-Based PnL.** PnL is not calculated as a raw percentage of notional. Price moves are denominated in ticks (1 tick = 1 basis point of entry price). Each market has a fixed USDC `tick_value` per contract. Final PnL:
 
 ```
-Strategy input: "Go short with 5x leverage when price drops 0.3% in the last 15 seconds. Use 30% of my balance."
-
-Groq parse → {
-  direction: "short",
-  leverage: 5,
-  condition: { type: "price_change", threshold: -0.3, lookback_seconds: 15 },
-  exit: "expiry",
-  margin_pct: 30
-}
-
-Agent executes: 1 trade per 30s round, autonomously, until stopped
+ticks = (exit_price - entry_price) × 10,000 / (entry_price × tick_size_bps)
+pnl   = directed_ticks × tick_value × contracts × leverage
 ```
 
-Pre-built strategies:
-- **The Bull** — Always long, 5x leverage, 50% margin
-- **The Contrarian** — Short when price up, long when down, 2x leverage
-- **The Conservative** — Momentum-following, 2x leverage, 25% margin
+This means a 0.1% SOL move at 10x leverage on a 1-contract SOL position returns a fixed USDC amount regardless of absolute price — predictable, gameable in a good way.
 
-Agents and humans compete on the same SOAR leaderboard. Filter by human/agent to see who's actually winning.
+**VRF Bonus Multiplier.** On trade settlement, the Volt program requests randomness via `VRFzLsXSiuF2BN6fwEf8yJJANW2PBGnY6W2FMqSe1wk`. The VRF oracle calls back `callback_bonus(ctx, randomness: [u8; 32])`. The first byte maps to a multiplier: ≤50 → 1x, ≤85 → 2x, >85 → 3x. Late callbacks (position already settled) are no-ops. Distribution target: 50% / 35% / 15%.
 
----
+**Session Key Execution.** Users create a scoped session keypair via `useSessionKeyManager` (MagicBlock SDK). The session keypair signs all ER transactions for the session duration — no wallet popup per trade. AI agents use the session keypair directly for autonomous execution without user intervention.
 
-## Private Payments
+**Agent Economy.** A natural language strategy is parsed by Groq `llama-3.1-8b-instant` into a typed `AgentParams` struct. The agent runs a loop: each new round triggers one `open_position` call using the session keypair. Agents and humans execute against the same pool, read the same oracle, and are ranked on the same SOAR leaderboard. No separate agent infrastructure — the ER handles both.
 
-Deposit and withdraw USDC into the Volt vault via MagicBlock's Private Payments API (backed by Intel TDX Private Ephemeral Rollups):
-
-- `/api/private/deposit` — deposit USDC, hide wallet trail
-- `/api/private/withdraw` — exit pool privately
-- `/api/private/transfer` — transfer between private balances
-- `/api/private/balance` — check private balance
-
-Your pool entry is not visible to other traders' wallets.
+**Private Pool Entry.** Deposit and withdrawal routes proxy to MagicBlock's Private Payments API, backed by Intel TDX Private Ephemeral Rollups. Pool entry amount and wallet identity are not visible to other traders at the base layer.
 
 ---
 
-## Getting Started
+## Repository Structure
+
+```
+volt/
+  web3/
+    programs/volt/src/lib.rs     Anchor program — Vault, Market, Round, Position, VRF callback
+    tests/volt.ts                47 Anchor tests — delegation, oracle, VRF, PnL math, liquidation
+    migrations/deploy.ts         Devnet deployment script
+    scripts/init-vault.ts        Vault + market initialization
+  frontend/
+    src/
+      app/
+        page.tsx                 Trading UI — market grid, round manager, position flow
+        agent/page.tsx           Agent builder — strategy input, preset strategies, agent management
+        leaderboard/page.tsx     SOAR leaderboard — humans + agents ranked
+        hedge/page.tsx           Hedge mode
+        api/
+          agent/parse/route.ts   Groq strategy parser — natural language → AgentParams
+          agent/execute/route.ts Agent execution loop — per-round trade submission
+          private/               MagicBlock Private Payments proxy (deposit/withdraw/transfer/balance)
+      hooks/
+        useRoundManager.ts       Round lifecycle — create, delegate, poll, settle
+        useSessionKey.ts         MagicBlock session key manager
+        useOraclePrice.ts        Pyth Lazer PDA read on ER direct RPC
+        useSoarLeaderboard.ts    SOAR leaderboard queries
+        useVault.ts              Vault state — LP deposits, VLP shares, utilization
+        usePrivatePayments.ts    Private Payments API integration
+      lib/
+        markets.ts               50+ markets — Pyth Hermes feed IDs + Pyth Lazer oracle PDAs
+        constants.ts             Program ID, RPC endpoints, oracle PDA, SOAR addresses
+      components/
+        MarketGrid.tsx           Market selection with live Pyth Hermes price feeds
+        DepositModal.tsx         LP deposit flow
+    tests/
+      api/agent-parse.test.ts    31 tests — Groq parser coverage
+      api/agent-execute.test.ts  35 tests — execution loop against live devnet
+      hooks/useRoundManager.test.ts  20 tests — round lifecycle hooks
+      soar/leaderboard.test.ts   20 tests — SOAR integration
+```
+
+---
+
+## MagicBlock Integration
+
+| Service | Role | Files |
+|---|---|---|
+| **Ephemeral Rollups** | Round delegation/undelegation; all position execution happens on ER | `web3/programs/volt/src/lib.rs` (raw CPI), `src/hooks/useRoundManager.ts` |
+| **Pricing Oracle (Pyth Lazer)** | SOL/USD feed read at offset 73 of PDA `9Uz4aJ2LKfc6Dt4zByG6qRDVtGbHC2ZBHissoc9x343P`; live only on ER (returns 0 on base) | `web3/programs/volt/src/lib.rs` (`read_oracle_price`), `src/hooks/useOraclePrice.ts` |
+| **Session Keys** | `useSessionKeyManager(anchorWallet, connection, "devnet")` — scoped keypair for gasless trading | `src/app/providers.tsx`, `src/hooks/useSessionKey.ts` |
+| **Cranks** | Time-triggered round settlement at `end_time` | `web3/programs/volt/src/lib.rs` (`settle_round` crank instruction) |
+| **SOAR** | `@magicblock-labs/soar-sdk` — leaderboard init, score recording after each round | `frontend/scripts/setup-soar.ts`, `src/hooks/useSoarLeaderboard.ts` |
+| **VRF** | `VRFzLsXSiuF2BN6fwEf8yJJANW2PBGnY6W2FMqSe1wk` — bonus multiplier callback | `web3/programs/volt/src/lib.rs` (`callback_bonus`) |
+| **Private Payments API** | Pool entry privacy via Intel TDX PER | `src/app/api/private/deposit/route.ts`, `withdraw/route.ts`, `transfer/route.ts`, `balance/route.ts`, `src/hooks/usePrivatePayments.ts` |
+
+**Note on Rust SDK:** `ephemeral-rollups-sdk` crate dropped due to unresolved version conflict (`solana-instruction v2` vs `v3` against `anchor-lang 0.32.1`). Delegation implemented via raw manual CPI following the exact protocol: copy data → buffer PDA, zero round data, `assign(system_program)`, `invoke_signed(system_instruction::assign(round, delegation_program))`, CPI to delegation program. Confirmed working at slot 452907347.
+
+---
+
+## Onchain
+
+| | Address | Explorer |
+|---|---|---|
+| Volt Program | `BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi` | [Devnet](https://explorer.solana.com/address/BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi?cluster=devnet) |
+| IDL Account | `GNR5mfywFrxzUReVAfbspE7yrxWj92hUdSLfxaGG6vBh` | [Devnet](https://explorer.solana.com/address/GNR5mfywFrxzUReVAfbspE7yrxWj92hUdSLfxaGG6vBh?cluster=devnet) |
+| SOAR Game | `GKWPKiofxmzg39UmefK4nGqB5Ahoi9aBMtMR6BBaP54f` | [Devnet](https://explorer.solana.com/address/GKWPKiofxmzg39UmefK4nGqB5Ahoi9aBMtMR6BBaP54f?cluster=devnet) |
+| SOAR Leaderboard | `3p4hEbGnLMDgFKLDbbGdZ9JdEmJgKWjTFh77MXesk56H` | [Devnet](https://explorer.solana.com/address/3p4hEbGnLMDgFKLDbbGdZ9JdEmJgKWjTFh77MXesk56H?cluster=devnet) |
+| Test USDC Mint | `ATuzV4xZPYWB2hrmVZgcf1GrzcCCT6UtBUWtW7gH9VR1` | [Devnet](https://explorer.solana.com/address/ATuzV4xZPYWB2hrmVZgcf1GrzcCCT6UtBUWtW7gH9VR1?cluster=devnet) |
+| Pyth Lazer Oracle (ER) | `9Uz4aJ2LKfc6Dt4zByG6qRDVtGbHC2ZBHissoc9x343P` | ER Devnet |
+| Delegation Program | `DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh` | MagicBlock |
+
+---
+
+## Quick Start
 
 ```bash
-# Clone and install
-git clone <repo>
-cd frontend && npm install
+# Frontend
+cd frontend && npm install && npm run dev
 
-# Environment (copy and fill)
-cp .env.example .env.local
-# NEXT_PUBLIC_SOLANA_RPC=https://api.devnet.solana.com
-# NEXT_PUBLIC_ER_RPC=https://devnet-router.magicblock.app
-# NEXT_PUBLIC_PROGRAM_ID=BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi
-# GROQ_API_KEY=<your key>
+# Anchor tests
+cd web3 && anchor test
 
-# Run dev server
-npm run dev
-
-# Run all tests
-npm run test        # vitest (frontend)
-cd ../web3 && anchor test  # Anchor program tests
+# Frontend tests
+cd frontend && npm run test
 ```
 
-**Wallet setup for devnet:**
-1. Connect Phantom/Solflare to Devnet
-2. Airdrop SOL: `solana airdrop 2 <your-address> --url devnet`
-3. Mint test USDC from the faucet (instructions in app)
+Environment:
+```
+NEXT_PUBLIC_SOLANA_RPC=https://api.devnet.solana.com
+NEXT_PUBLIC_ER_RPC=https://devnet-router.magicblock.app
+NEXT_PUBLIC_PROGRAM_ID=BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi
+GROQ_API_KEY=<your key>
+```
 
 ---
 
-## Stack
+## Tech Stack
 
-| Layer | Technology |
+| Component | Technology |
 |---|---|
-| Smart Contract | Anchor 0.32.1 (Rust), Solana Devnet |
-| Ephemeral Rollup | MagicBlock ER SDK (TypeScript), manual CPI delegation (Rust) |
+| Smart Contract | Anchor 0.32.1, Rust, Solana Devnet |
+| Ephemeral Rollup | MagicBlock ER — `@magicblock-labs/ephemeral-rollups-sdk`, raw CPI delegation |
 | Frontend | Next.js 15, TypeScript, Tailwind CSS v4 |
-| AI Parse | Groq `llama-3.1-8b-instant` |
-| Oracle | Pyth Lazer via MagicBlock ER, Pyth Hermes (frontend display) |
+| Agent Strategy Parser | Groq `llama-3.1-8b-instant` |
+| Oracle (display) | Pyth Hermes REST — 3s polling per market |
+| Oracle (settlement) | Pyth Lazer via MagicBlock ER — offset 73 u64 LE |
 | Leaderboard | MagicBlock SOAR SDK |
 | Charts | lightweight-charts |
-| Testing | Vitest, React Testing Library, Anchor/Mocha |
+| Testing | Vitest, Anchor/Mocha (47 + 106 tests) |
 
 ---
 
-*Built solo at Solana Blitz v3 (April 3-5, 2026) — MagicBlock hackathon*
+*Solana Blitz v3 — MagicBlock hackathon — April 2026*

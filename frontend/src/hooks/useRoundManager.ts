@@ -128,14 +128,16 @@ export function useRoundManager(marketSymbol: string = "SOL") {
     return getProgram(erConn);
   }, [getProgram]);
 
-  const startRound = useCallback(async () => {
+  const startRound = useCallback(async (symbolOverride?: string) => {
     const program = getProgram();
     if (!program || isRunning.current) return;
     isRunning.current = true;
 
+    const symbol = symbolOverride ?? marketSymbol;
+
     try {
       const vaultPda = getVaultPda();
-      const marketPda = getMarketPda(marketSymbol);
+      const marketPda = getMarketPda(symbol);
       const counterPda = getRoundCounterPda(marketPda);
 
       // Fetch round counter to get next round number
