@@ -1,6 +1,6 @@
 # Volt ⚡
 
-Fully onchain perpetuals with 30-second settlement rounds, GMX-style liquidity pools, and autonomous AI agent trading — powered by MagicBlock Ephemeral Rollups.
+Fully onchain perpetuals with 30-second settlement rounds, smart venue routing across Solana's deepest perp protocols (Drift, Jupiter, Ardena, Zeta Markets, Mango), and autonomous AI agent trading — powered by MagicBlock Ephemeral Rollups.
 
 [PLACEHOLDER: Live App] | [Program on Devnet](https://explorer.solana.com/address/BoekHe38pAQxZKdYqPMmcDvHBCjwnY3fAkEHuxTu6Lwi?cluster=devnet) | [SOAR Leaderboard](https://explorer.solana.com/address/3p4hEbGnLMDgFKLDbbGdZ9JdEmJgKWjTFh77MXesk56H?cluster=devnet)
 
@@ -52,7 +52,7 @@ PDAs (seeds → account):
 
 **30-Second Epochs.** Each trading round is a fixed 30-second window. The round account is created on base Solana, delegated to an ER (at which point it becomes writable only at ER speed), and undelegated on expiry via Crank-triggered settlement. Positions can only be opened while the round is in `Open` status on the ER.
 
-**GMX-Style Pool Model.** A single USDC vault backs all positions across all markets. LPs deposit USDC and receive VLP shares representing their proportional claim. The pool is the counterparty to every trade. When traders win, the pool pays; when traders lose, the pool earns. Max utilization is capped at 80% to protect LP principal. Max profit per position is capped at 10x collateral.
+**Smart Venue Routing.** Volt scans five Solana perp venues — Drift, Jupiter, Ardena, Zeta Markets, Mango — and routes each round through the venue offering best execution. LPs deposit USDC into the vault, which backs positions routed across these protocols. Max utilization is capped at 80% to protect LP principal. Max profit per position is capped at 10x collateral.
 
 **Amplified Tick-Based PnL.** PnL is not calculated as a raw percentage of notional. Price moves are denominated in ticks (1 tick = 1 basis point of entry price). Each market has a fixed USDC `tick_value` per contract. Final PnL:
 

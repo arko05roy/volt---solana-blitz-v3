@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Market, MARKETS, MARKET_CATEGORIES, MarketCategory } from "@/lib/markets";
 
 
@@ -13,7 +14,7 @@ export interface ActiveTradeState {
   contracts: number;
   entryPrice: number;
   phase: "creating" | "open" | "settling" | "settled";
-  timer: number;           // seconds remaining (30s round)
+  timer: number;
   unrealizedPnl: number | null;
   settledPnl: number | null;
   settledTicks: number | null;
@@ -66,42 +67,27 @@ function fmt(p: number): string {
 }
 
 const CAT_LABELS: Record<MarketCategory, string> = {
-  all: "All Markets", major: "Majors", solana: "Solana",
-  ai: "AI", defi: "DeFi", layer1: "Layer 1",
-  layer2: "Layer 2", meme: "Meme",
+  all: "All", major: "Majors", solana: "Solana",
+  ai: "AI", defi: "DeFi", layer1: "L1",
+  layer2: "L2", meme: "Meme",
 };
 
 const LEVERAGE_PRESETS = [2, 5, 10] as const;
 
 // ── Routing + ER spin-up animation panel ─────────────────
-//
-// Timeline (ms from mount):
-//   0    – venue scan: Drift checking
-//   700  – venue scan: Jupiter checking
-//   1400 – venue resolved: Ardena routing
-//   2200 – switch to ER view
-//   2200 – ER step 0: spawning rollup
-//   3100 – ER step 1: delegating accounts
-//   4000 – ER step 2: committing to L1
-//   4900 – ER step 3: confirmed ✓
-//
 const ALL_VENUES = ["Drift", "Jupiter", "Ardena", "Zeta Markets", "Mango"];
 
 function pickVenues(): string[] {
-  // Always 3 venues. Winner is random. Order is shuffled but winner always last.
   const shuffled = [...ALL_VENUES].sort(() => Math.random() - 0.5).slice(0, 3);
-  // Winner = last in scan order
   return shuffled;
 }
 
 function RoutingPanel() {
-  // phase: "routing" | "er"
   const [phase, setPhase] = useState<"routing" | "er">("routing");
-  const [venueStep, setVenueStep] = useState(0);   // index of venue currently being scanned
-  const [erStep, setErStep] = useState(0);          // 0-3
+  const [venueStep, setVenueStep] = useState(0);
+  const [erStep, setErStep] = useState(0);
   const [dots, setDots] = useState(0);
 
-  // Stable venue list for this mount — pick once
   const venuesRef = useRef<string[]>(pickVenues());
   const venues = venuesRef.current;
 
@@ -124,133 +110,178 @@ function RoutingPanel() {
 
   const dotStr = ".".repeat(dots);
 
-  // ── Venue rows ──
-  // venues[0] and venues[1] get skipped; venues[2] wins
   type VenueState = "checking" | "skip" | "pending" | "routing";
   const venueRows: { name: string; state: VenueState }[] = venues.map((name, i) => {
     if (venueStep < i) return { name, state: "pending" };
     if (venueStep === i && i < 2) return { name, state: "checking" };
     if (venueStep > i && i < 2) return { name, state: "skip" };
-    // i === 2 (winner)
     if (venueStep < 2) return { name, state: "pending" };
     if (venueStep === 2) return { name, state: "checking" };
     return { name, state: "routing" };
   });
 
-  // ── ER steps ──
   const erSteps = [
     { label: "Spawning ephemeral rollup", sub: "allocating validator slot" },
     { label: "Delegating accounts",       sub: "locking state on Solana L1" },
     { label: "Committing to base layer",  sub: "writing CPI proof on-chain" },
-    { label: "Round live",                sub: "ER confirmed ✓" },
+    { label: "Round live",                sub: "ER confirmed" },
   ];
 
   if (phase === "routing") {
     return (
-      <div className="px-5 pb-5 pt-3 border-t border-zinc-700/50">
-        <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold mb-3">
+      <div className="px-5 pb-5 pt-3 border-t border-[var(--border)]">
+        <p className="text-[10px] uppercase tracking-[0.15em] text-[var(--muted-foreground)] font-semibold mb-3">
           Finding Best Venue
         </p>
         <div className="flex flex-col gap-2">
-          {venueRows.map(({ name, state }) => (
-            <div
+          {venueRows.map(({ name, state }, i) => (
+            <motion.div
               key={name}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.1 }}
               className={`
-                flex items-center justify-between rounded-lg px-3 py-2 text-xs transition-all duration-300
-                ${state === "routing"  ? "bg-emerald-900/20 border border-emerald-700/40" : ""}
-                ${state === "checking" ? "bg-zinc-800/70 border border-zinc-700/50" : ""}
-                ${state === "pending"  ? "bg-zinc-900/50 border border-zinc-800/30 opacity-40" : ""}
-                ${state === "skip"     ? "bg-zinc-900/30 border border-zinc-800/20 opacity-25" : ""}
+                flex items-center justify-between rounded-xl px-3 py-2.5 text-xs transition-all duration-300
+                ${state === "routing"  ? "bg-[var(--volt-long-dim)] border border-[rgba(0,229,160,0.15)]" : ""}
+                ${state === "checking" ? "bg-[var(--surface-2)] border border-[var(--border-hover)]" : ""}
+                ${state === "pending"  ? "bg-[var(--surface-1)] border border-[var(--border)] opacity-40" : ""}
+                ${state === "skip"     ? "bg-[var(--surface-1)] border border-[var(--border)] opacity-20" : ""}
               `}
             >
-              <div className="flex items-center gap-2">
-                {state === "routing"  && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
-                {state === "checking" && <div className="w-3 h-3 border border-zinc-500 border-t-white rounded-full animate-spin" />}
-                {(state === "pending" || state === "skip") && <div className="w-1.5 h-1.5 rounded-full bg-zinc-700" />}
-                <span className={`font-semibold ${state === "routing" ? "text-emerald-400" : state === "checking" ? "text-white" : "text-zinc-600"}`}>
+              <div className="flex items-center gap-2.5">
+                {state === "routing"  && <div className="w-1.5 h-1.5 rounded-full bg-[var(--volt-long)] animate-breathe" />}
+                {state === "checking" && <div className="w-3.5 h-3.5 border-2 border-[var(--muted-foreground)] border-t-white rounded-full animate-spin" />}
+                {(state === "pending" || state === "skip") && <div className="w-1.5 h-1.5 rounded-full bg-[var(--surface-4)]" />}
+                <span className={`font-semibold ${state === "routing" ? "text-[var(--volt-long)]" : state === "checking" ? "text-white" : "text-[var(--muted-foreground)]"}`}>
                   {name}
                 </span>
               </div>
-              <span className={`font-mono text-[10px] ${state === "routing" ? "text-emerald-500" : state === "checking" ? "text-zinc-400" : "text-zinc-700"}`}>
+              <span className={`font-mono text-[10px] ${state === "routing" ? "text-[var(--volt-long)]" : state === "checking" ? "text-[var(--muted-foreground)]" : "text-[var(--surface-4)]"}`}>
                 {state === "routing" ? `routing${dotStr}` : state === "checking" ? `scanning${dotStr}` : state === "skip" ? "skipped" : "—"}
               </span>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
     );
   }
 
-  // ── ER phase ──
   return (
-    <div className="px-5 pb-5 pt-3 border-t border-zinc-700/50">
-      {/* Header row */}
+    <div className="px-5 pb-5 pt-3 border-t border-[var(--border)]">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold">
+          <p className="text-[10px] uppercase tracking-[0.15em] text-[var(--muted-foreground)] font-semibold">
             Ephemeral Rollup
           </p>
-          <p className="text-[9px] text-emerald-500/70 font-mono mt-0.5">
+          <p className="text-[9px] text-[var(--volt-long)] font-mono mt-0.5 opacity-70">
             via {venues[2]}
           </p>
         </div>
-        <span className="text-[9px] font-mono px-2 py-0.5 rounded-md bg-violet-900/30 border border-violet-700/40 text-violet-400">
+        <span className="text-[9px] font-mono px-2 py-0.5 rounded-lg bg-[var(--volt-brand-dim)] border border-[rgba(139,92,246,0.15)] text-violet-400">
           MagicBlock ER
         </span>
       </div>
 
-      {/* Step list */}
       <div className="flex flex-col gap-1.5">
         {erSteps.map((s, i) => {
           const isDone    = erStep > i;
           const isActive  = erStep === i;
           const isPending = erStep < i;
           return (
-            <div
+            <motion.div
               key={i}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: isPending ? 0.35 : 1, x: 0 }}
+              transition={{ delay: i * 0.08 }}
               className={`
-                flex items-start gap-3 rounded-lg px-3 py-2.5 text-xs transition-all duration-400
-                ${isDone    ? "bg-emerald-900/15 border border-emerald-800/25" : ""}
-                ${isActive  ? "bg-violet-900/20 border border-violet-700/40"   : ""}
-                ${isPending ? "bg-zinc-900/40 border border-zinc-800/20 opacity-35" : ""}
+                flex items-start gap-3 rounded-xl px-3 py-2.5 text-xs transition-all duration-400
+                ${isDone    ? "bg-[var(--volt-long-dim)] border border-[rgba(0,229,160,0.1)]" : ""}
+                ${isActive  ? "bg-[var(--volt-brand-dim)] border border-[rgba(139,92,246,0.2)]" : ""}
+                ${isPending ? "bg-[var(--surface-1)] border border-[var(--border)]" : ""}
               `}
             >
-              {/* Icon */}
               <div className="mt-0.5 flex-shrink-0">
-                {isDone    && <div className="w-3.5 h-3.5 rounded-full bg-emerald-500/30 border border-emerald-500/60 flex items-center justify-center"><span className="text-[8px] text-emerald-400 font-bold">✓</span></div>}
-                {isActive  && <div className="w-3.5 h-3.5 border border-violet-500 border-t-transparent rounded-full animate-spin" />}
-                {isPending && <div className="w-3.5 h-3.5 rounded-full border border-zinc-700" />}
+                {isDone    && <div className="w-4 h-4 rounded-full bg-[rgba(0,229,160,0.15)] border border-[rgba(0,229,160,0.3)] flex items-center justify-center"><span className="text-[8px] text-[var(--volt-long)] font-bold">✓</span></div>}
+                {isActive  && <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />}
+                {isPending && <div className="w-4 h-4 rounded-full border border-[var(--surface-4)]" />}
               </div>
-
-              {/* Text */}
               <div className="flex-1 min-w-0">
-                <p className={`font-semibold leading-none mb-0.5 ${isDone ? "text-emerald-400" : isActive ? "text-white" : "text-zinc-600"}`}>
+                <p className={`font-semibold leading-none mb-0.5 ${isDone ? "text-[var(--volt-long)]" : isActive ? "text-white" : "text-[var(--muted-foreground)]"}`}>
                   {s.label}{isActive ? dotStr : ""}
                 </p>
-                <p className={`text-[10px] font-mono leading-none ${isDone ? "text-emerald-600/70" : isActive ? "text-violet-400/70" : "text-zinc-700"}`}>
+                <p className={`text-[10px] font-mono leading-none ${isDone ? "text-[var(--volt-long)] opacity-50" : isActive ? "text-violet-400 opacity-70" : "text-[var(--muted-foreground)]"}`}>
                   {s.sub}
                 </p>
               </div>
-            </div>
+            </motion.div>
           );
         })}
       </div>
 
       {erStep >= 3 && (
-        <p className="text-[10px] text-emerald-500/60 mt-3 text-center font-mono tracking-wide">
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-[10px] text-[var(--volt-long)] mt-3 text-center font-mono tracking-wide opacity-60"
+        >
           zero-latency execution · no internal liquidity used
-        </p>
+        </motion.p>
       )}
     </div>
   );
 }
 
-// ── Active Position Display (inside card) ────────────────
+// ── Circular countdown timer ─────────────────────────────
+function CountdownRing({ seconds, total = 30 }: { seconds: number; total?: number }) {
+  const radius = 22;
+  const circumference = 2 * Math.PI * radius;
+  const progress = seconds / total;
+  const offset = circumference * (1 - progress);
+
+  const color = seconds <= 5
+    ? "var(--volt-short)"
+    : seconds <= 10
+      ? "var(--volt-amber)"
+      : "rgba(255,255,255,0.7)";
+
+  return (
+    <div className={`relative inline-flex items-center justify-center ${seconds <= 5 ? "animate-countdown-pulse" : ""}`}>
+      <svg width="56" height="56" className="-rotate-90">
+        {/* Background ring */}
+        <circle
+          cx="28" cy="28" r={radius}
+          fill="none"
+          stroke="var(--surface-3)"
+          strokeWidth="3"
+        />
+        {/* Progress ring */}
+        <circle
+          cx="28" cy="28" r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className="transition-all duration-200 ease-linear"
+        />
+      </svg>
+      {/* Center number */}
+      <span
+        className="absolute text-lg font-mono font-bold"
+        style={{ color }}
+      >
+        {seconds}
+      </span>
+    </div>
+  );
+}
+
+// ── Active Position Display ──────────────────────────────
 function ActivePositionPanel({ trade }: { trade: ActiveTradeState }) {
   const isProfit = (trade.unrealizedPnl ?? 0) >= 0;
   const settledProfit = (trade.settledPnl ?? 0) >= 0;
 
-  // Creating / settling spinner — show routing animation
   if (trade.phase === "creating") {
     return <RoutingPanel />;
   }
@@ -258,100 +289,103 @@ function ActivePositionPanel({ trade }: { trade: ActiveTradeState }) {
   // Settled result
   if (trade.phase === "settled" && trade.settledPnl !== null) {
     return (
-      <div className="px-5 pb-5 pt-3 border-t border-zinc-700/50">
-        <div className={`rounded-xl p-4 ${settledProfit ? "bg-emerald-900/20 border border-emerald-700/40" : "bg-red-900/20 border border-red-700/40"}`}>
+      <div className="px-5 pb-5 pt-3 border-t border-[var(--border)]">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className={`rounded-2xl p-4 ${settledProfit
+            ? "bg-[var(--volt-long-dim)] border border-[rgba(0,229,160,0.15)]"
+            : "bg-[var(--volt-short-dim)] border border-[rgba(255,71,87,0.15)]"
+          }`}
+        >
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Round Settled</span>
-            <span className={`text-xl font-mono font-black ${settledProfit ? "text-emerald-400" : "text-red-400"}`}>
+            <span className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-[0.15em]">Round Settled</span>
+            <span className={`text-xl font-mono font-black ${settledProfit ? "text-[var(--volt-long)]" : "text-[var(--volt-short)]"}`}>
               {settledProfit ? "+" : ""}${Math.abs(trade.settledPnl).toFixed(2)}
             </span>
           </div>
           <div className="grid grid-cols-4 gap-2 text-[11px]">
             <div>
-              <p className="text-zinc-600">Position</p>
-              <p className="text-zinc-400">{trade.direction.toUpperCase()} {trade.leverage}x</p>
+              <p className="text-[var(--muted-foreground)] text-[10px]">Position</p>
+              <p className="text-[var(--foreground)] font-medium">{trade.direction.toUpperCase()} {trade.leverage}x</p>
             </div>
             <div>
-              <p className="text-zinc-600">Contracts</p>
-              <p className="text-zinc-400">{trade.contracts}</p>
+              <p className="text-[var(--muted-foreground)] text-[10px]">Contracts</p>
+              <p className="text-[var(--foreground)] font-medium">{trade.contracts}</p>
             </div>
             <div>
-              <p className="text-zinc-600">Ticks</p>
-              <p className="text-zinc-400 font-mono">{(trade.settledTicks ?? 0).toFixed(1)}</p>
+              <p className="text-[var(--muted-foreground)] text-[10px]">Ticks</p>
+              <p className="text-[var(--foreground)] font-mono">{(trade.settledTicks ?? 0).toFixed(1)}</p>
             </div>
             <div>
-              <p className="text-zinc-600">ROI</p>
-              <p className={`font-mono ${settledProfit ? "text-emerald-400" : "text-red-400"}`}>
+              <p className="text-[var(--muted-foreground)] text-[10px]">ROI</p>
+              <p className={`font-mono font-bold ${settledProfit ? "text-[var(--volt-long)]" : "text-[var(--volt-short)]"}`}>
                 {((trade.settledPnl / trade.collateral) * 100).toFixed(1)}%
               </p>
             </div>
           </div>
-        </div>
+        </motion.div>
       </div>
     );
   }
 
   // Open round — countdown + live PnL
   return (
-    <div className="px-5 pb-5 pt-3 border-t border-zinc-700/50">
-      {/* Direction badge + timer */}
+    <div className="px-5 pb-5 pt-3 border-t border-[var(--border)]">
+      {/* Direction badge + circular timer */}
       <div className="flex items-center justify-between mb-4">
-        <span className={`text-xs font-black px-3 py-1.5 rounded-lg uppercase tracking-wider ${
+        <span className={`text-xs font-black px-3.5 py-1.5 rounded-xl uppercase tracking-wider ${
           trade.direction === "long"
-            ? "bg-emerald-600/20 text-emerald-400 border border-emerald-600/30"
-            : "bg-red-600/20 text-red-400 border border-red-600/30"
+            ? "bg-[var(--volt-long-dim)] text-[var(--volt-long)] border border-[rgba(0,229,160,0.2)]"
+            : "bg-[var(--volt-short-dim)] text-[var(--volt-short)] border border-[rgba(255,71,87,0.2)]"
         }`}>
           {trade.direction} {trade.leverage}x
         </span>
 
-        {/* Countdown */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-zinc-600 uppercase tracking-widest">Closes in</span>
-          <span className={`text-2xl font-mono font-black ${
-            trade.timer <= 5 ? "text-red-400 animate-pulse" : "text-white"
-          }`}>
-            {String(trade.timer).padStart(2, "0")}
-          </span>
-        </div>
+        <CountdownRing seconds={trade.timer} />
       </div>
 
       {/* Stats grid */}
-      <div className="grid grid-cols-3 gap-3 mb-3">
-        <div className="bg-zinc-800/50 rounded-lg px-3 py-2">
-          <p className="text-[10px] text-zinc-600 mb-0.5">Collateral</p>
-          <p className="text-sm font-mono text-white">${trade.collateral.toFixed(2)}</p>
-        </div>
-        <div className="bg-zinc-800/50 rounded-lg px-3 py-2">
-          <p className="text-[10px] text-zinc-600 mb-0.5">Entry</p>
-          <p className="text-sm font-mono text-white">${fmt(trade.entryPrice)}</p>
-        </div>
-        <div className="bg-zinc-800/50 rounded-lg px-3 py-2">
-          <p className="text-[10px] text-zinc-600 mb-0.5">Contracts</p>
-          <p className="text-sm font-mono text-white">{trade.contracts}</p>
-        </div>
+      <div className="grid grid-cols-3 gap-2.5 mb-3">
+        {[
+          { label: "Collateral", value: `$${trade.collateral.toFixed(2)}` },
+          { label: "Entry", value: `$${fmt(trade.entryPrice)}` },
+          { label: "Contracts", value: String(trade.contracts) },
+        ].map((stat) => (
+          <div key={stat.label} className="bg-[var(--surface-2)] rounded-xl px-3 py-2.5 border border-[var(--border)]">
+            <p className="text-[9px] text-[var(--muted-foreground)] uppercase tracking-[0.15em] mb-0.5">{stat.label}</p>
+            <p className="text-sm font-mono text-white font-medium">{stat.value}</p>
+          </div>
+        ))}
       </div>
 
-      {/* Live PnL — big and prominent */}
+      {/* Live PnL */}
       {trade.unrealizedPnl !== null && (
-        <div className={`rounded-xl px-4 py-3 flex items-center justify-between ${
-          isProfit ? "bg-emerald-900/15 border border-emerald-800/30" : "bg-red-900/15 border border-red-800/30"
-        }`}>
-          <span className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Unrealized PnL</span>
+        <motion.div
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`rounded-2xl px-4 py-3 flex items-center justify-between ${
+            isProfit
+              ? "bg-[var(--volt-long-dim)] border border-[rgba(0,229,160,0.12)]"
+              : "bg-[var(--volt-short-dim)] border border-[rgba(255,71,87,0.12)]"
+          }`}
+        >
+          <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-[0.15em] font-semibold">Unrealized PnL</span>
           <div className="text-right">
-            <p className={`text-xl font-mono font-black ${isProfit ? "text-emerald-400" : "text-red-400"}`}>
+            <p className={`text-xl font-mono font-black ${isProfit ? "text-[var(--volt-long)]" : "text-[var(--volt-short)]"}`}>
               {isProfit ? "+" : ""}${Math.abs(trade.unrealizedPnl).toFixed(2)}
             </p>
-            <p className={`text-xs font-mono ${isProfit ? "text-emerald-500/70" : "text-red-500/70"}`}>
+            <p className={`text-xs font-mono opacity-60 ${isProfit ? "text-[var(--volt-long)]" : "text-[var(--volt-short)]"}`}>
               {isProfit ? "+" : ""}{((trade.unrealizedPnl / trade.collateral) * 100).toFixed(1)}%
             </p>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {trade.phase === "settling" && (
         <div className="flex items-center justify-center gap-2 mt-3">
-          <div className="w-4 h-4 border-2 border-zinc-600 border-t-white rounded-full animate-spin" />
-          <span className="text-xs text-zinc-500">Settling...</span>
+          <div className="w-4 h-4 border-2 border-[var(--surface-4)] border-t-white rounded-full animate-spin" />
+          <span className="text-xs text-[var(--muted-foreground)]">Settling round...</span>
         </div>
       )}
     </div>
@@ -365,17 +399,18 @@ function MarketCard({
   isExpanded,
   onToggle,
   activeTrade,
+  index,
 }: {
   market: Market;
   onTrade: (m: Market, direction: "long" | "short", leverage: number, margin: number) => void;
   isExpanded: boolean;
   onToggle: () => void;
   activeTrade: ActiveTradeState | null;
+  index: number;
 }) {
   const { price, direction } = useLivePrice(market.pythHermesFeedId);
   const hasActiveTrade = activeTrade !== null;
 
-  // Local trade config state
   const [leverage, setLeverage] = useState<number>(2);
   const [customLev, setCustomLev] = useState("");
   const [showCustom, setShowCustom] = useState(false);
@@ -407,51 +442,53 @@ function MarketCard({
   }, [customLev]);
 
   return (
-    <div className="group relative" style={{ "--accent": market.color } as React.CSSProperties}>
-      {/* Glow */}
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: Math.min(index * 0.04, 0.4), ease: "easeOut" }}
+      className="group relative"
+      style={{ "--accent": market.color } as React.CSSProperties}
+    >
+      {/* Hover glow */}
       <div
-        className="absolute -inset-[1px] rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-sm pointer-events-none"
-        style={{ background: `${market.color}33` }}
+        className="absolute -inset-[1px] rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 blur-md pointer-events-none"
+        style={{ background: `${market.color}20` }}
       />
 
       <div className={`
         relative rounded-2xl border transition-all duration-300 overflow-hidden
         ${hasActiveTrade
-          ? "border-white/25 bg-zinc-800/95 shadow-2xl shadow-black/50"
+          ? "border-[var(--border-active)] bg-[var(--surface-1)] shadow-2xl shadow-black/40"
           : isExpanded
-            ? "border-white/20 bg-zinc-800/95 shadow-2xl shadow-black/40"
-            : "border-zinc-800/80 bg-zinc-900/70 hover:border-zinc-700/80 hover:bg-zinc-800/60 cursor-pointer"
+            ? "border-[var(--border-hover)] bg-[var(--surface-1)] shadow-xl shadow-black/30"
+            : "border-[var(--border)] bg-[var(--surface-1)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-2)] cursor-pointer"
         }
-        ${flash === "up" ? "ring-1 ring-emerald-500/30" : ""}
-        ${flash === "down" ? "ring-1 ring-red-500/30" : ""}
       `}>
-        {/* Accent bar */}
+        {/* Left accent line */}
         <div
-          className="h-[3px] w-full"
+          className="absolute left-0 top-0 bottom-0 w-[2px] transition-opacity duration-300"
           style={{
-            background: (isExpanded || hasActiveTrade)
-              ? `linear-gradient(90deg, ${market.color}, ${market.color}66, transparent)`
-              : `linear-gradient(90deg, ${market.color}88, transparent)`,
+            background: `linear-gradient(180deg, ${market.color}, ${market.color}44, transparent)`,
+            opacity: (isExpanded || hasActiveTrade) ? 1 : 0.4,
           }}
         />
 
-        {/* ── Header (always visible) ── */}
-        <div className="px-5 pt-4 pb-4" onClick={hasActiveTrade ? undefined : onToggle}>
+        {/* ── Header ── */}
+        <div className="px-5 pt-4 pb-4 pl-6" onClick={hasActiveTrade ? undefined : onToggle}>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
               <div
-                className="w-11 h-11 rounded-xl flex items-center justify-center overflow-hidden"
+                className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden"
                 style={{
-                  background: `${market.color}18`,
-                  border: `1px solid ${market.color}25`,
+                  background: `linear-gradient(135deg, ${market.color}15, ${market.color}08)`,
+                  border: `1px solid ${market.color}20`,
                 }}
               >
                 <img
                   src={market.logo}
                   alt={market.symbol}
-                  className="w-7 h-7 object-contain"
+                  className="w-6 h-6 object-contain"
                   onError={(e) => {
-                    // Fallback to text if logo fails
                     const el = e.currentTarget;
                     el.style.display = "none";
                     el.parentElement!.innerHTML = `<span style="color:${market.color};font-size:10px;font-weight:900;letter-spacing:-0.5px">${market.symbol.slice(0, 4)}</span>`;
@@ -459,21 +496,21 @@ function MarketCard({
                 />
               </div>
               <div>
-                <p className="text-base font-bold text-white leading-none">{market.symbol}</p>
-                <p className="text-xs text-zinc-500 mt-0.5">{market.name}</p>
+                <p className="text-sm font-bold text-white leading-none tracking-tight">{market.symbol}</p>
+                <p className="text-[11px] text-[var(--muted-foreground)] mt-0.5">{market.name}</p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <span
-                className="text-[9px] uppercase tracking-widest font-medium px-2 py-0.5 rounded-md"
-                style={{ background: `${market.color}12`, color: `${market.color}BB` }}
+                className="text-[9px] uppercase tracking-[0.12em] font-medium px-2 py-0.5 rounded-lg"
+                style={{ background: `${market.color}10`, color: `${market.color}AA`, border: `1px solid ${market.color}15` }}
               >
                 {market.category}
               </span>
               {!hasActiveTrade && (
                 <svg
-                  className={`w-4 h-4 text-zinc-600 transition-transform duration-300 ${isExpanded ? "rotate-180" : ""}`}
+                  className={`w-3.5 h-3.5 text-[var(--muted-foreground)] transition-transform duration-300 ${isExpanded ? "rotate-180" : ""}`}
                   fill="none" stroke="currentColor" viewBox="0 0 24 24"
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -484,167 +521,199 @@ function MarketCard({
 
           {/* Price */}
           <div className="flex items-end justify-between">
-            <p className={`text-2xl font-mono font-bold transition-colors duration-300 ${
-              flash === "up" ? "text-emerald-400" : flash === "down" ? "text-red-400" : "text-white"
-            }`}>
-              {price !== null ? `$${fmt(price)}` : <span className="text-zinc-700">—</span>}
-            </p>
-            <div className="flex gap-3 text-[10px] text-zinc-600 font-mono pb-1">
+            <div className="flex items-baseline gap-2">
+              <p className={`text-2xl font-mono font-bold transition-colors duration-300 ${
+                flash === "up" ? "text-[var(--volt-long)]" : flash === "down" ? "text-[var(--volt-short)]" : "text-white"
+              }`}>
+                {price !== null ? `$${fmt(price)}` : (
+                  <span className="flex gap-1">
+                    {[0,1,2].map(i => (
+                      <span key={i} className="inline-block w-6 h-5 rounded bg-[var(--surface-3)] animate-pulse" style={{ animationDelay: `${i * 150}ms` }} />
+                    ))}
+                  </span>
+                )}
+              </p>
+              {flash && (
+                <motion.span
+                  initial={{ opacity: 0, y: flash === "up" ? 4 : -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className={`text-[10px] font-mono font-bold ${
+                    flash === "up" ? "text-[var(--volt-long)]" : "text-[var(--volt-short)]"
+                  }`}
+                >
+                  {flash === "up" ? "↑" : "↓"}
+                </motion.span>
+              )}
+            </div>
+            <div className="flex gap-3 text-[10px] text-[var(--muted-foreground)] font-mono pb-1">
               <span>${market.tickValue}/tick</span>
               <span>${market.marginPerContract} min</span>
             </div>
           </div>
         </div>
 
-        {/* ── Active trade panel (replaces trade config when position is live) ── */}
+        {/* ── Active trade panel ── */}
         {hasActiveTrade && <ActivePositionPanel trade={activeTrade} />}
 
-        {/* ── Trade config panel (only when expanded and no active trade) ── */}
+        {/* ── Trade config panel ── */}
         {!hasActiveTrade && (
-          <div className={`
-            overflow-hidden transition-all duration-300 ease-out
-            ${isExpanded ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"}
-          `}>
-            <div className="px-5 pb-5 pt-1 border-t border-zinc-700/50">
-              {/* Leverage */}
-              <div className="mb-4 mt-3">
-                <p className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 font-semibold">Leverage</p>
-                <div className="flex gap-2">
-                  {LEVERAGE_PRESETS.map((lev) => (
-                    <button
-                      key={lev}
-                      onClick={() => handleLevPreset(lev)}
-                      className={`
-                        flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-150
-                        ${leverage === lev && !showCustom
-                          ? "bg-white text-black shadow-lg shadow-white/10"
-                          : "bg-zinc-700/50 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
-                        }
-                      `}
-                    >
-                      {lev}x
-                    </button>
-                  ))}
-                  {showCustom ? (
-                    <div className="flex-1 relative">
+          <AnimatePresence>
+            {isExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="px-5 pb-5 pt-1 pl-6 border-t border-[var(--border)]">
+                  {/* Leverage */}
+                  <div className="mb-4 mt-3">
+                    <p className="text-[10px] uppercase tracking-[0.15em] text-[var(--muted-foreground)] mb-2.5 font-semibold">Leverage</p>
+                    <div className="flex gap-2">
+                      {LEVERAGE_PRESETS.map((lev) => (
+                        <button
+                          key={lev}
+                          onClick={() => handleLevPreset(lev)}
+                          className={`
+                            flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-200
+                            ${leverage === lev && !showCustom
+                              ? "bg-white text-[var(--surface-0)] shadow-lg shadow-white/10"
+                              : "bg-[var(--surface-3)] text-[var(--muted-foreground)] border border-[var(--border)] hover:border-[var(--border-hover)] hover:text-white"
+                            }
+                          `}
+                        >
+                          {lev}x
+                        </button>
+                      ))}
+                      {showCustom ? (
+                        <div className="flex-1 relative">
+                          <input
+                            type="number"
+                            autoFocus
+                            placeholder="1-50"
+                            value={customLev}
+                            onChange={(e) => setCustomLev(e.target.value)}
+                            onBlur={applyCustomLev}
+                            onKeyDown={(e) => e.key === "Enter" && applyCustomLev()}
+                            className="w-full h-full bg-[var(--surface-2)] border border-[var(--volt-brand)] rounded-xl text-sm text-center text-white font-bold outline-none focus:ring-2 focus:ring-[var(--volt-brand-glow)]"
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowCustom(true)}
+                          className={`
+                            flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-200
+                            ${!LEVERAGE_PRESETS.includes(leverage as 2 | 5 | 10)
+                              ? "bg-white text-[var(--surface-0)] shadow-lg shadow-white/10"
+                              : "bg-[var(--surface-3)] text-[var(--muted-foreground)] border border-dashed border-[var(--surface-4)] hover:border-[var(--border-hover)] hover:text-white"
+                            }
+                          `}
+                        >
+                          {!LEVERAGE_PRESETS.includes(leverage as 2 | 5 | 10) ? `${leverage}x` : "Custom"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Margin slider */}
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] uppercase tracking-[0.15em] text-[var(--muted-foreground)] font-semibold">Margin</p>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-lg font-mono font-bold text-white">${marginVal}</span>
+                        <span className="text-[10px] text-[var(--muted-foreground)] font-mono">USDC</span>
+                      </div>
+                    </div>
+                    <div className="relative h-10 flex items-center">
                       <input
-                        type="number"
-                        autoFocus
-                        placeholder="1-50"
-                        value={customLev}
-                        onChange={(e) => setCustomLev(e.target.value)}
-                        onBlur={applyCustomLev}
-                        onKeyDown={(e) => e.key === "Enter" && applyCustomLev()}
-                        className="w-full h-full bg-zinc-700/50 border border-zinc-500 rounded-xl text-sm text-center text-white font-bold outline-none focus:border-white/40"
+                        type="range"
+                        min={market.marginPerContract}
+                        max={maxMargin}
+                        step={market.marginPerContract}
+                        value={marginVal}
+                        onChange={(e) => setMarginVal(Number(e.target.value))}
+                        className="w-full cursor-pointer"
+                        style={{
+                          background: `linear-gradient(90deg, ${market.color}55 0%, ${market.color}18 ${(marginVal / maxMargin) * 100}%, var(--surface-3) ${(marginVal / maxMargin) * 100}%, var(--surface-3) 100%)`,
+                        }}
                       />
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => setShowCustom(true)}
-                      className={`
-                        flex-1 py-2.5 rounded-xl text-sm font-bold transition-all duration-150
-                        ${!LEVERAGE_PRESETS.includes(leverage as 2 | 5 | 10)
-                          ? "bg-white text-black shadow-lg shadow-white/10"
-                          : "bg-zinc-700/50 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 border border-dashed border-zinc-600"
-                        }
-                      `}
+                    <div className="flex gap-1.5 mt-1.5">
+                      {[10, 25, 50, 100, 250, 500].map((amt) => (
+                        <button
+                          key={amt}
+                          onClick={() => setMarginVal(amt)}
+                          className={`
+                            flex-1 py-1.5 rounded-lg text-[10px] font-semibold transition-all duration-150
+                            ${marginVal === amt
+                              ? "bg-[var(--surface-4)] text-white border border-[var(--border-hover)]"
+                              : "bg-[var(--surface-2)] text-[var(--muted-foreground)] border border-[var(--border)] hover:text-white hover:border-[var(--border-hover)]"
+                            }
+                          `}
+                        >
+                          ${amt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Position preview */}
+                  {contracts > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-[var(--surface-2)] border border-[var(--border)] rounded-xl px-4 py-2.5 mb-4 flex justify-between items-center text-xs"
                     >
-                      {!LEVERAGE_PRESETS.includes(leverage as 2 | 5 | 10) ? `${leverage}x` : "Custom"}
-                    </button>
+                      <div className="text-[var(--muted-foreground)]">
+                        <span className="text-white font-bold">{contracts}</span> contract{contracts !== 1 ? "s" : ""}
+                      </div>
+                      <div className="text-[var(--muted-foreground)] font-mono">
+                        ${market.tickValue * leverage * contracts}<span className="opacity-50">/tick</span>
+                      </div>
+                      <div className="text-[var(--muted-foreground)] font-mono">
+                        ~${notional.toLocaleString()} <span className="opacity-50">notional</span>
+                      </div>
+                    </motion.div>
                   )}
-                </div>
-              </div>
 
-              {/* Margin slider */}
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold">Margin</p>
-                  <div className="flex items-center gap-1">
-                    <span className="text-lg font-mono font-bold text-white">${marginVal}</span>
-                    <span className="text-[10px] text-zinc-600 font-mono">USDC</span>
-                  </div>
-                </div>
-                <div className="relative h-10 flex items-center">
-                  <input
-                    type="range"
-                    min={market.marginPerContract}
-                    max={maxMargin}
-                    step={market.marginPerContract}
-                    value={marginVal}
-                    onChange={(e) => setMarginVal(Number(e.target.value))}
-                    className="w-full accent-white cursor-pointer"
-                    style={{
-                      background: `linear-gradient(90deg, ${market.color}66 0%, ${market.color}22 ${(marginVal / maxMargin) * 100}%, #27272a ${(marginVal / maxMargin) * 100}%, #27272a 100%)`,
-                      height: "6px",
-                      borderRadius: "999px",
-                      WebkitAppearance: "none",
-                      appearance: "none",
-                    }}
-                  />
-                </div>
-                <div className="flex gap-1.5 mt-1">
-                  {[10, 25, 50, 100, 250, 500].map((amt) => (
+                  {/* Long / Short buttons */}
+                  <div className="flex gap-3">
                     <button
-                      key={amt}
-                      onClick={() => setMarginVal(amt)}
-                      className={`
-                        flex-1 py-1 rounded-lg text-[10px] font-semibold transition-all
-                        ${marginVal === amt ? "bg-zinc-600 text-white" : "bg-zinc-800/80 text-zinc-600 hover:text-zinc-400"}
-                      `}
+                      onClick={() => onTrade(market, "long", leverage, marginVal)}
+                      className="
+                        flex-1 py-3.5 rounded-xl text-sm font-black uppercase tracking-wider
+                        bg-[var(--volt-long-dim)] text-[var(--volt-long)]
+                        border border-[rgba(0,229,160,0.15)]
+                        hover:bg-[rgba(0,229,160,0.18)] hover:border-[rgba(0,229,160,0.3)]
+                        hover:shadow-[0_0_40px_var(--volt-long-glow)]
+                        active:scale-[0.97] transition-all duration-200
+                      "
                     >
-                      ${amt}
+                      Long {leverage}x
                     </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Position preview */}
-              {contracts > 0 && (
-                <div className="bg-zinc-800/60 rounded-xl px-4 py-2.5 mb-4 flex justify-between items-center text-xs">
-                  <div className="text-zinc-500">
-                    <span className="text-white font-bold">{contracts}</span> contract{contracts !== 1 ? "s" : ""}
-                  </div>
-                  <div className="text-zinc-500 font-mono">
-                    ${market.tickValue * leverage * contracts}<span className="text-zinc-700">/tick</span>
-                  </div>
-                  <div className="text-zinc-500 font-mono">
-                    ~${notional.toLocaleString()} <span className="text-zinc-700">notional</span>
+                    <button
+                      onClick={() => onTrade(market, "short", leverage, marginVal)}
+                      className="
+                        flex-1 py-3.5 rounded-xl text-sm font-black uppercase tracking-wider
+                        bg-[var(--volt-short-dim)] text-[var(--volt-short)]
+                        border border-[rgba(255,71,87,0.15)]
+                        hover:bg-[rgba(255,71,87,0.18)] hover:border-[rgba(255,71,87,0.3)]
+                        hover:shadow-[0_0_40px_var(--volt-short-glow)]
+                        active:scale-[0.97] transition-all duration-200
+                      "
+                    >
+                      Short {leverage}x
+                    </button>
                   </div>
                 </div>
-              )}
-
-              {/* Long / Short buttons */}
-              <div className="flex gap-3">
-                <button
-                  onClick={() => onTrade(market, "long", leverage, marginVal)}
-                  className="
-                    flex-1 py-3.5 rounded-xl text-sm font-black uppercase tracking-wider
-                    bg-emerald-600/25 text-emerald-400 border border-emerald-600/30
-                    hover:bg-emerald-600/40 hover:border-emerald-400/50
-                    hover:shadow-[0_0_30px_rgba(16,185,129,0.2)]
-                    active:scale-[0.97] transition-all duration-150
-                  "
-                >
-                  Long {leverage}x
-                </button>
-                <button
-                  onClick={() => onTrade(market, "short", leverage, marginVal)}
-                  className="
-                    flex-1 py-3.5 rounded-xl text-sm font-black uppercase tracking-wider
-                    bg-red-600/25 text-red-400 border border-red-600/30
-                    hover:bg-red-600/40 hover:border-red-400/50
-                    hover:shadow-[0_0_30px_rgba(239,68,68,0.2)]
-                    active:scale-[0.97] transition-all duration-150
-                  "
-                >
-                  Short {leverage}x
-                </button>
-              </div>
-            </div>
-          </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -660,7 +729,6 @@ export default function MarketGrid({
   const [search, setSearch] = useState("");
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null);
 
-  // Auto-expand the card that has an active trade
   const activeSymbol = activeTrade?.marketSymbol ?? null;
 
   const filtered = MARKETS.filter((m) => {
@@ -672,25 +740,42 @@ export default function MarketGrid({
     return matchesCat && matchesSearch;
   });
 
+  // Count per category
+  const catCounts: Record<MarketCategory, number> = {
+    all: MARKETS.length,
+    major: 0, solana: 0, ai: 0, defi: 0, layer1: 0, layer2: 0, meme: 0,
+  };
+  MARKETS.forEach((m) => { catCounts[m.category]++; });
+
   return (
     <div className="w-full">
       {/* Filter bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-5">
-        <div className="flex gap-1 bg-zinc-900/80 rounded-xl p-1 border border-zinc-800/60">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-6">
+        {/* Category tabs */}
+        <div className="flex gap-0.5 bg-[var(--surface-1)] rounded-xl p-1 border border-[var(--border)]">
           {MARKET_CATEGORIES.map((cat) => (
             <button
               key={cat}
               onClick={() => setCategory(cat)}
               className={`
-                px-3 py-1.5 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all duration-150
-                ${category === cat ? "bg-white text-black shadow-sm" : "text-zinc-500 hover:text-zinc-300"}
+                relative px-3 py-1.5 rounded-lg text-[11px] font-semibold uppercase tracking-wider transition-all duration-200
+                ${category === cat
+                  ? "bg-white text-[var(--surface-0)] shadow-md shadow-white/5"
+                  : "text-[var(--muted-foreground)] hover:text-white"
+                }
               `}
             >
               {CAT_LABELS[cat]}
+              {cat !== "all" && (
+                <span className={`ml-1 text-[9px] ${category === cat ? "opacity-50" : "opacity-40"}`}>
+                  {catCounts[cat]}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
+        {/* Search */}
         <div className="relative">
           <input
             type="text"
@@ -698,22 +783,23 @@ export default function MarketGrid({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="
-              bg-zinc-900/80 border border-zinc-800/60 rounded-xl px-3 py-1.5 pl-8
-              text-xs text-white placeholder-zinc-600 outline-none
-              focus:border-zinc-600 transition-colors w-48
+              bg-[var(--surface-1)] border border-[var(--border)] rounded-xl px-3 py-1.5 pl-8
+              text-xs text-white placeholder-[var(--muted-foreground)] outline-none
+              focus:border-[var(--border-hover)] focus:ring-2 focus:ring-[var(--volt-brand-glow)]
+              transition-all w-48
             "
           />
-          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--muted-foreground)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
         </div>
 
-        <span className="text-[11px] text-zinc-600 ml-auto font-mono">{filtered.length} markets</span>
+        <span className="text-[11px] text-[var(--muted-foreground)] ml-auto font-mono">{filtered.length} markets</span>
       </div>
 
-      {/* Grid — 3 columns */}
+      {/* Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filtered.map((m) => (
+        {filtered.map((m, i) => (
           <MarketCard
             key={m.symbol}
             market={m}
@@ -721,12 +807,16 @@ export default function MarketGrid({
             isExpanded={expandedSymbol === m.symbol || activeSymbol === m.symbol}
             onToggle={() => setExpandedSymbol(expandedSymbol === m.symbol ? null : m.symbol)}
             activeTrade={activeSymbol === m.symbol ? activeTrade : null}
+            index={i}
           />
         ))}
       </div>
 
       {filtered.length === 0 && (
-        <div className="text-center py-12 text-zinc-600 text-sm">No markets found</div>
+        <div className="text-center py-16 text-[var(--muted-foreground)] text-sm">
+          <p className="text-lg mb-1">No markets found</p>
+          <p className="text-xs opacity-60">Try adjusting your search or category filter</p>
+        </div>
       )}
     </div>
   );

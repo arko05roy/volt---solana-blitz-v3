@@ -5,6 +5,7 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useAnchorWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, Connection, Keypair, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { BN, Program, AnchorProvider } from "@coral-xyz/anchor";
+import { motion, AnimatePresence } from "framer-motion";
 import { useOraclePrice } from "@/hooks/useOraclePrice";
 import { useSessionKey } from "@/hooks/useSessionKey";
 import { useRoundManager, RoundPhase, getPositionPda, getMarketPda } from "@/hooks/useRoundManager";
@@ -35,6 +36,71 @@ interface SettledResult {
   exitPrice: number;
   pnl: number;
   ticks: number;
+}
+
+/* ── Animated VOLT logo mark ────────────────────────── */
+function VoltLogo() {
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="relative">
+        {/* Glow behind */}
+        <div className="absolute inset-0 rounded-lg bg-[var(--volt-brand)] blur-lg opacity-30" />
+        <div className="relative w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-violet-700 flex items-center justify-center shadow-lg shadow-violet-500/20">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M9.5 1L4 9h4l-1.5 6L12 7H8L9.5 1z" fill="white" strokeLinejoin="round" />
+          </svg>
+        </div>
+      </div>
+      <div>
+        <h1 className="text-lg font-bold tracking-tight text-white leading-none">VOLT</h1>
+        <p className="text-[9px] text-[var(--muted-foreground)] tracking-[0.2em] uppercase leading-none mt-0.5">Micro-Futures</p>
+      </div>
+    </div>
+  );
+}
+
+/* ── Session status indicator ───────────────────────── */
+function SessionIndicator({ isActive, isExpired, createSession }: {
+  isActive: boolean;
+  isExpired: boolean;
+  createSession: () => void;
+}) {
+  if (isActive) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--volt-long-dim)] border border-[rgba(0,229,160,0.15)]">
+        <div className="w-1.5 h-1.5 rounded-full bg-[var(--volt-long)] animate-breathe" />
+        <span className="text-[11px] font-medium text-[var(--volt-long)]">Session Active</span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={createSession}
+      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--surface-3)] border border-[var(--border)] hover:border-[var(--border-hover)] hover:bg-[var(--surface-4)] transition-all duration-200"
+    >
+      <div className={`w-1.5 h-1.5 rounded-full ${isExpired ? "bg-[var(--volt-short)]" : "bg-[var(--muted-foreground)]"}`} />
+      <span className="text-[11px] font-medium text-[var(--muted-foreground)]">
+        {isExpired ? "Renew Session" : "Create Session"}
+      </span>
+    </button>
+  );
+}
+
+/* ── Live stats bar ─────────────────────────────────── */
+function StatsBar({ marketsCount }: { marketsCount: number }) {
+  return (
+    <div className="flex items-center gap-4 text-[10px] font-mono text-[var(--muted-foreground)]">
+      <div className="flex items-center gap-1.5">
+        <div className="w-1 h-1 rounded-full bg-[var(--volt-long)] animate-breathe" />
+        <span>{marketsCount} Markets Live</span>
+      </div>
+      <div className="h-3 w-px bg-[var(--border)]" />
+      <span>30s Rounds</span>
+      <div className="h-3 w-px bg-[var(--border)]" />
+      <span>Ephemeral Rollup</span>
+    </div>
+  );
 }
 
 export default function TradingPage() {
@@ -221,11 +287,8 @@ export default function TradingPage() {
     }
   }
 
-  const sessionLabel = isExpired ? "Expired" : isActive ? "Active" : "None";
-
   // ── Build activeTrade state to pass into MarketGrid ────
   const activeTrade: ActiveTradeState | null = (() => {
-    // Creating phase (pending trade waiting for round)
     if (pendingTradeRef.current && (round.phase === "creating" || round.phase === "delegating")) {
       return {
         marketSymbol: selectedMarket.symbol,
@@ -243,7 +306,6 @@ export default function TradingPage() {
       };
     }
 
-    // Active position
     if (position) {
       const phase: ActiveTradeState["phase"] =
         round.phase === "settling" ? "settling" : "open";
@@ -263,7 +325,6 @@ export default function TradingPage() {
       };
     }
 
-    // Settled result
     if (settledResult) {
       return {
         marketSymbol: selectedMarket.symbol,
@@ -285,42 +346,60 @@ export default function TradingPage() {
   })();
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col">
-      {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold tracking-tight text-white">VOLT</h1>
-          <span className="text-xs text-zinc-500 bg-zinc-900 px-2 py-1 rounded">Micro-Futures</span>
-        </div>
-        <div className="flex items-center gap-6">
-          {/* Session */}
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-zinc-500">Session:</span>
-            <span className={isActive ? "text-green-400" : isExpired ? "text-red-400" : "text-zinc-500"}>
-              {sessionLabel}
-            </span>
-            {!isActive && (
-              <button onClick={createSession} className="text-blue-400 hover:underline">
-                {isExpired ? "Renew" : "Create"}
-              </button>
-            )}
+    <div className="min-h-screen flex flex-col">
+      {/* ── Header ─────────────────────────────────────── */}
+      <motion.header
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: "easeOut" }}
+        className="sticky top-0 z-40 glass border-b border-[var(--border)]"
+      >
+        <div className="flex items-center justify-between px-6 py-3 max-w-[1440px] mx-auto w-full">
+          <div className="flex items-center gap-8">
+            <VoltLogo />
+            <StatsBar marketsCount={MARKETS.length} />
           </div>
-          <WalletMultiButton />
+          <div className="flex items-center gap-3">
+            <SessionIndicator isActive={isActive} isExpired={isExpired} createSession={createSession} />
+            <WalletMultiButton />
+          </div>
         </div>
-      </header>
+      </motion.header>
 
-      {/* Market Grid */}
-      <div className="flex-1 px-4 py-6 max-w-[1400px] mx-auto w-full">
+      {/* ── Trade message toast ─────────────────────────── */}
+      <AnimatePresence>
         {tradeMessage && (
-          <div className={`rounded-xl p-3 text-xs font-medium mb-4 max-w-sm ${
-            tradeMessage.startsWith("Error") ? "bg-red-900/20 text-red-400 border border-red-800/30" : "bg-yellow-900/20 text-yellow-400 border border-yellow-800/30"
-          }`}>
-            {tradeMessage}
-          </div>
+          <motion.div
+            initial={{ opacity: 0, y: -12, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12, scale: 0.95 }}
+            transition={{ duration: 0.25 }}
+            className="fixed top-16 left-1/2 -translate-x-1/2 z-50"
+          >
+            <div className={`
+              rounded-xl px-4 py-2.5 text-xs font-medium backdrop-blur-xl shadow-2xl
+              ${tradeMessage.startsWith("Error")
+                ? "bg-[var(--volt-short-dim)] text-[var(--volt-short)] border border-[rgba(255,71,87,0.2)]"
+                : "bg-[var(--volt-brand-dim)] text-violet-300 border border-[rgba(139,92,246,0.2)]"
+              }
+            `}>
+              {tradeMessage}
+            </div>
+          </motion.div>
         )}
-        <MarketGrid onTrade={handleMarketTrade} activeTrade={activeTrade} />
-      </div>
+      </AnimatePresence>
 
+      {/* ── Main content ───────────────────────────────── */}
+      <motion.main
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.15 }}
+        className="flex-1 px-4 py-6 max-w-[1440px] mx-auto w-full"
+      >
+        <MarketGrid onTrade={handleMarketTrade} activeTrade={activeTrade} />
+      </motion.main>
+
+      {/* ── Agent Orb ──────────────────────────────────── */}
       <AgentOrb onTrade={handleMarketTrade} />
     </div>
   );
